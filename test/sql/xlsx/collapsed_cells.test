@@ -1,0 +1,41 @@
+require xml
+
+# Try reading a file with collapsed cells
+
+query IIII
+SELECT * FROM 'test/sql/xlsx/data/collapsed_cells.xlsx'
+----
+a	b	c	d
+a	2x1	NULL	b
+a	b	c	d
+1x2	b	2x2	NULL
+NULL	b	NULL	NULL
+
+# Skipping past doesnt seem to work properly, but at least it doesnt crash
+query IIII
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells.xlsx', skip=1);
+----
+a	2x1	NULL	b
+a	b	c	d
+1x2	b	2x2	NULL
+NULL	b	NULL	NULL
+
+
+# FIXME: Broken
+query IIII
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells.xlsx', skip=2);
+----
+a	2x1	NULL	b
+a	b	c	d
+1x2	b	2x2	NULL
+NULL	b	NULL	NULL
+
+
+# FIXME: Crashes
+#query IIII
+#SELECT * FROM 'test/sql/xlsx/data/collapsed_cells_jagged.xlsx'
+#----
+#a	b	c
+#a	b	2x1
+#a	b	c
+#a	1x2	b

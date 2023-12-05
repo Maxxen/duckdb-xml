@@ -1,0 +1,6 @@
+<table>
+    <row column1="value1" column2="value2"/>
+    <row column1="value3" column2="value4"/>
+    <row column1="value5" column2="value6"/>
+    <row column1="value7" column2="value8"/>
+</table>

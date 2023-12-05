@@ -32,22 +32,22 @@ ifeq ($(GEN),ninja)
 endif
 
 #### Configuration for this extension
-EXTENSION_NAME=QUACK
+EXTENSION_NAME=XML
 EXTENSION_FLAGS=\
--DDUCKDB_EXTENSION_NAMES="quack" \
+-DDUCKDB_EXTENSION_NAMES="xml" \
 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_PATH="$(PROJ_DIR)" \
 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_LOAD_TESTS=1 \
 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_INCLUDE_PATH="$(PROJ_DIR)src/include" \
 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_TEST_PATH="$(PROJ_DIR)test/sql"
 
 #### Add more of the DuckDB in-tree extensions here that you need (also feel free to remove them when not needed)
-EXTRA_EXTENSIONS_FLAG=-DBUILD_EXTENSIONS="tpch;visualizer"
+EXTRA_EXTENSIONS_FLAG=-DBUILD_EXTENSIONS=""
 
 BUILD_FLAGS=-DEXTENSION_STATIC_BUILD=1 $(EXTENSION_FLAGS) ${EXTRA_EXTENSIONS_FLAG} $(OSX_BUILD_FLAG) $(TOOLCHAIN_FLAGS)
 CLIENT_FLAGS:=
 
 #### Main build
-# For regular CLI build, we link the quack extension directly into the DuckDB executable
+# For regular CLI build, we link the xml extension directly into the DuckDB executable
 CLIENT_FLAGS=-DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=1
 
 debug:
@@ -81,8 +81,8 @@ test_debug: debug
 	./build/debug/$(TEST_PATH) "$(PROJ_DIR)test/*"
 
 #### Client tests
-DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/quack/quack.duckdb_extension'
-RELEASE_EXT_PATH='$(PROJ_DIR)build/release/extension/quack/quack.duckdb_extension'
+DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/xml/xml.duckdb_extension'
+RELEASE_EXT_PATH='$(PROJ_DIR)build/release/extension/xml/xml.duckdb_extension'
 test_js: test_debug_js
 test_debug_js: debug_js
 	cd duckdb/tools/nodejs && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(DEBUG_EXT_PATH) npm run test-path -- "../../../test/nodejs/**/*.js"
