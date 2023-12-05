@@ -327,7 +327,11 @@ struct XLSXBindInfo : public TableFunctionData {
 	// Whether or not all columns should be treated as VARCHAR
 	bool all_varchar = false;
 
+    // The number of columns to output
 	idx_t column_count = 0;
+
+    // The total number of columns in the sheet
+    idx_t total_column_count = 0;
 };
 
 static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindInput &input,
@@ -398,7 +402,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
             for (auto &sheet : workbook_parser.sheets) {
                 sheet_names.push_back(sheet.first);
             }
-            auto candidate_msg = StringUtil::CandidatesErrorMessage(sheet_names, result->sheet_name, "Suggestions:");
+            auto candidate_msg = StringUtil::CandidatesErrorMessage(sheet_names, result->sheet_name, "Suggestions");
             throw IOException("Failed to find sheet '%s' in file \n%s", result->sheet_name, candidate_msg);
         }
 	}
@@ -436,7 +440,8 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	// Set based on the sniffer info
 	result->first_row_is_header = sniffer.found_header;
 	result->initial_rows_to_skip = sniffer.start_row;
-	result->column_count = sniffer.total_column_count;
+    result->total_column_count = sniffer.total_column_count;
+    result->column_count = sniffer.total_column_count;
 
 	// Set the return types
 	for (idx_t i = 0; i < sniffer.row_types.size(); i++) {
@@ -499,12 +504,25 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	}
 	else {
 		// Just give them standard names.
-		// TODO: Name them by excel column names instead!
 		for (idx_t i = 0; i < sniffer.row_types.size(); i++) {
-			// TODO: Actually, can we do this? can't you remove a column in excel?
 			names.push_back(ToExcelColumnName(i + 1)); // 1 indexed
 		}
 	}
+
+    auto types_size = return_types.size();
+    auto names_size = names.size();
+    // If the header was larger than the data, fill missing column with varchar
+    if(types_size < names_size) {
+        for(idx_t i = types_size; i < names_size; i++) {
+            return_types.push_back(LogicalType::VARCHAR);
+        }
+    }
+    // If the data was larger than the header, fill missing names with default names
+    if(names_size < types_size) {
+        for(idx_t i = names_size; i < types_size; i++) {
+            names.push_back(ToExcelColumnName(i + 1)); // 1 indexed
+        }
+    }
 
 	return std::move(result);
 }
@@ -565,15 +583,17 @@ struct XLSSheetReader : public XMLStateMachine<XLSSheetReader> {
 	idx_t start_row = 0;
 	idx_t current_row = 0;
 	idx_t current_column = 0;
-
+    idx_t end_column = 0;
 	idx_t current_output_row = 0;
 
 	CellType current_cell_type;
 	string current_data;
+    string current_cell_ref;
 
 	bool in_row = false;
 	bool in_row_range = false;
 	bool in_column = false;
+    bool in_column_range = false;
 	bool in_value = false;
 
 	vector<string> &string_table;
@@ -596,9 +616,22 @@ public:
 		if(in_row_range && !in_column && strcmp(name, "c") == 0) {
 			in_column = true;
 			current_cell_type = CellTypes::FromAttributes(atts);
+
+            if(current_column < end_column) {
+                in_column_range = true;
+            } else {
+                in_column_range = false;
+            }
+
+            for(int i = 0; atts[i]; i += 2) {
+                if(strcmp(atts[i], "r") == 0) {
+                    current_cell_ref = string(atts[i + 1]);
+                }
+            }
+
 			return;
 		}
-		if(in_row_range && in_column && !in_value && strcmp(name, "v") == 0) {
+		if(in_row_range && in_column_range && !in_value && strcmp(name, "v") == 0) {
 			in_value = true;
 			return;
 		}
@@ -607,44 +640,70 @@ public:
 	void OnEndElement(const char *name) {
 		if(in_row && strcmp(name, "row") == 0) {
 			in_row = false;
-
 			current_row++;
-			current_column = 0;
 
 			if(in_row_range) {
+
+                if(current_column < end_column){
+                    // Pad the rest of the row with NULLs
+                    for(idx_t i = current_column; i < end_column; i++) {
+                        FlatVector::SetNull(payload_chunk.data[i], current_output_row, true);
+                    }
+                }
+
 				current_output_row++;
 			}
+
 			if(current_output_row == STANDARD_VECTOR_SIZE) {
 				// Emit the chunk
 				Suspend();
 			}
+
+            current_column = 0;
 			return;
 		}
 		if(in_row_range && in_column && strcmp(name, "c") == 0) {
 			in_column = false;
-			// Set the value in the payload chunk
-			auto &payload_vec = payload_chunk.data[current_column];
-			if(current_data.empty()) {
-				FlatVector::SetNull(payload_vec, current_output_row, true);
-			} else {
-				string_t blob;
-				if(current_cell_type == CellType::SHARED_STRING) {
-					auto idx = std::stoi(current_data);
-					if(idx >= string_table.size()) {
-						throw IOException("Failed to find shared string with index %d", idx);
-					}
-					auto entry = string_table[idx];
-					blob = StringVector::AddStringOrBlob(payload_vec, entry);
-				} else {
-					blob = StringVector::AddStringOrBlob(payload_vec, current_data);
-				}
-				FlatVector::GetData<string_t>(payload_vec)[current_output_row] = blob;
-				current_data.clear();
-			}
+
+            if(in_column_range) {
+                // Set the value in the payload chunk
+                auto &payload_vec = payload_chunk.data[current_column];
+
+                // First of all, we should check if the current cell has the ref we expect it to have.
+                // If it doesn't, we need to fill in the missing cells with NULLs.
+                auto expected_ref = ToExcelColumnName(current_column + 1) + std::to_string(current_row + 1);
+                if(current_cell_ref != expected_ref) {
+                    // We need to fill in the missing cells with NULLs
+                    for(idx_t i = current_column; i < end_column; i++) {
+                        FlatVector::SetNull(payload_chunk.data[i], current_output_row, true);
+                    }
+                }
+                // Then check if the current cell is empty
+                else if (current_data.empty()) {
+                    FlatVector::SetNull(payload_vec, current_output_row, true);
+                } else {
+                    string_t blob;
+                    if (current_cell_type == CellType::SHARED_STRING) {
+                        auto idx = std::stoi(current_data);
+                        if (idx >= string_table.size()) {
+                            throw IOException("Failed to find shared string with index %d", idx);
+                        }
+                        auto entry = string_table[idx];
+                        blob = StringVector::AddStringOrBlob(payload_vec, entry);
+                    } else {
+                        blob = StringVector::AddStringOrBlob(payload_vec, current_data);
+                    }
+                    FlatVector::GetData<string_t>(payload_vec)[current_output_row] = blob;
+                    current_data.clear();
+                }
+            }
+
+            current_cell_ref.clear();
+
 			current_column++;
 			return;
 		}
-		if(in_row_range && in_column && in_value && strcmp(name, "v") == 0) {
+		if(in_row_range && in_column_range && in_value && strcmp(name, "v") == 0) {
 			in_value = false;
 			return;
 		}
@@ -683,6 +742,7 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 	// Initialize the sheet reader
 	result->sheet_reader = make_uniq<XLSSheetReader>(context, *result->string_table, bind_info.column_count);
 	result->sheet_reader->start_row = bind_info.initial_rows_to_skip;
+    result->sheet_reader->end_column = bind_info.column_count;
 
 	// Setup stream
 	result->sheet_stream = result->archive->Extract(bind_info.sheet_file_idx);

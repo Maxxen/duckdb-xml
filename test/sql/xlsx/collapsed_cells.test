@@ -31,11 +31,63 @@ a	b	c	d
 NULL	b	NULL	NULL
 
 
-# FIXME: Crashes
-#query IIII
-#SELECT * FROM 'test/sql/xlsx/data/collapsed_cells_jagged.xlsx'
-#----
-#a	b	c
-#a	b	2x1
-#a	b	c
-#a	1x2	b
+query III
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=0, header=false);
+----
+a	b	c
+a	b	c
+a	b	2x1
+a	b	c
+a	b	c
+a	1x2	c
+NULL	NULL	NULL
+
+
+query III
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=1, header=false);
+----
+a	b	c
+a	b	2x1
+a	b	c
+a	b	c
+a	1x2	c
+NULL	NULL	NULL
+
+query IIII
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=2, header=false);
+----
+a	b	2x1	NULL
+a	b	c	NULL
+a	b	c	NULL
+a	1x2	c	NULL
+NULL	NULL	NULL	NULL
+
+query III
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=3, header=false);
+----
+a	b	c
+a	b	c
+a	1x2	c
+NULL	NULL	NULL
+
+
+query III
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=4, header=false);
+----
+a	b	c
+a	1x2	c
+NULL	NULL	NULL
+
+query III
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=5, header=false);
+----
+a	1x2	c
+NULL	NULL	NULL
+
+
+# FIXME: This is kind of a wonky edge case. Although we dont really want to support collapsed cells properly.
+query I
+SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=6, header=false);
+----
+NULL
+

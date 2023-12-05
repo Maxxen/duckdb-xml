@@ -3,8 +3,12 @@
 #
 name: Main Extension Distribution Pipeline
 on:
-  push:
   pull_request:
+    paths-ignore:
+      - '**/README.md'
+  push:
+    paths-ignore:
+      - '**/README.md'
   workflow_dispatch:
 
 concurrency:
@@ -12,14 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  duckdb-main-pipeline:
-    name: DuckDB Main Pipeline
-    uses: duckdb/duckdb/.github/workflows/_extension_distribution.yml@26931f7ac687e8323c24e7f7b1e081114400d1b3
+  duckdb-stable-build:
+    name: Build extension binaries
+    uses: duckdb/duckdb/.github/workflows/_extension_distribution.yml@60ddc316ca0c1585f14d55aa73f9db59d8fc05d1
     with:
-      duckdb_version: 26931f7ac6
+      duckdb_version: v0.9.2
       extension_name: xml
-      extension_ref: ${{ github.ref_name }}
-    # Secrets are used to pass S3 credentials to the extension-upload script for distributing.
-    # Note that for security, switching to either explicitly passing secrets or moving the workflow into the extension
-    # repository can be considered.
-    secrets: inherit
+      vcpkg_commit: 9edb1b8e590cc086563301d735cae4b6e732d2d2 # TODO: remove pinned vcpkg commit when updating duckdb version
