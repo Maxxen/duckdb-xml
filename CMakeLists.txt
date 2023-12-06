@@ -9,7 +9,7 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
-set(EXTENSION_SOURCES src/xml_extension.cpp src/xlsx_reader.cpp src/xlsx_cell.cpp src/xml_reader.cpp src/zip_archive.cpp src/copy_xlsx.cpp)
+set(EXTENSION_SOURCES src/xml_extension.cpp src/xlsx_reader.cpp src/xml_reader.cpp src/zip_archive.cpp src/copy_xlsx.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
