@@ -49,7 +49,7 @@ shared_ptr<ZipArchiveFileHandle> ZipArchiveFileHandle::Open(FileSystem &fs, cons
 
 unique_ptr<ZipArchiveExtractStream> ZipArchiveFileHandle::Extract(const string &item_name) {
 	auto item_index = mz_zip_reader_locate_file(&zip_archive, item_name.c_str(), nullptr, 0);
-	if(item_index < 0) {
+	if (item_index < 0) {
 		return nullptr;
 	}
 	return Extract(item_index);
@@ -57,13 +57,13 @@ unique_ptr<ZipArchiveExtractStream> ZipArchiveFileHandle::Extract(const string &
 
 unique_ptr<ZipArchiveExtractStream> ZipArchiveFileHandle::Extract(int item_index) {
 	auto iter_state = mz_zip_reader_extract_iter_new(&zip_archive, item_index, 0);
-	if(!iter_state) {
+	if (!iter_state) {
 		throw IOException("Failed to initialize extract iterator for item %d", item_index);
 	}
 
 	mz_zip_archive_file_stat file_stat;
 	auto ok = mz_zip_reader_file_stat(&zip_archive, item_index, &file_stat);
-	if(!ok) {
+	if (!ok) {
 		throw IOException("Failed to read file stat for item %d", item_index);
 	}
 
@@ -72,10 +72,10 @@ unique_ptr<ZipArchiveExtractStream> ZipArchiveFileHandle::Extract(int item_index
 
 vector<pair<string, int>> ZipArchiveFileHandle::GetEntries() {
 	vector<pair<string, int>> result;
-	for(int i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
+	for (int i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
 		mz_zip_archive_file_stat file_stat;
 		auto ok = mz_zip_reader_file_stat(&zip_archive, i, &file_stat);
-		if(!ok) {
+		if (!ok) {
 			throw IOException("Failed to read file stat for item %d", i);
 		}
 		result.emplace_back(file_stat.m_filename, i);
@@ -85,14 +85,14 @@ vector<pair<string, int>> ZipArchiveFileHandle::GetEntries() {
 
 vector<pair<string, int>> ZipArchiveFileHandle::SearchEntries(std::function<bool(const string &)> &&predicate) {
 	vector<pair<string, int>> result;
-	for(int i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
+	for (int i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
 		mz_zip_archive_file_stat file_stat;
 		auto ok = mz_zip_reader_file_stat(&zip_archive, i, &file_stat);
-		if(!ok) {
+		if (!ok) {
 			throw IOException("Failed to read file stat for item %d", i);
 		}
 		auto str = string(file_stat.m_filename);
-		if(predicate(str)) {
+		if (predicate(str)) {
 			result.emplace_back(str, i);
 		}
 	}
@@ -108,7 +108,6 @@ ZipArchiveFileHandle::~ZipArchiveFileHandle() {
 	mz_zip_reader_end(&zip_archive);
 	delete file_handle;
 }
-
 
 //------------------------------------------------------------------------------
 // Extract stream
@@ -134,4 +133,4 @@ ZipArchiveExtractStream::~ZipArchiveExtractStream() {
 	mz_zip_reader_extract_iter_free(iter_state);
 }
 
-}
+} // namespace duckdb

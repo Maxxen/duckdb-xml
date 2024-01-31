@@ -22,7 +22,7 @@ struct MzZipArchive {
 	mz_zip_archive archive;
 
 	static size_t ReadCallback(void *user_data, mz_uint64 file_offset, void *buffer, size_t n) {
-		auto handle = static_cast<FileHandle*>(user_data);
+		auto handle = static_cast<FileHandle *>(user_data);
 		handle->Seek(file_offset);
 		return handle->Read(static_cast<data_ptr_t>(buffer), n);
 	}
@@ -33,7 +33,7 @@ struct MzZipArchive {
 		archive.m_pIO_opaque = handle.get();
 
 		auto ok = mz_zip_reader_init(&archive, handle->GetFileSize(), MZ_ZIP_FLAG_COMPRESSED_DATA); // TODO: Pass flags?
-		if(!ok) {
+		if (!ok) {
 			auto error = mz_zip_get_last_error(&archive);
 			auto error_str = mz_zip_get_error_string(error);
 			throw IOException("Failed to initialize zip reader: %s", error_str);
@@ -45,23 +45,24 @@ struct MzZipArchive {
 	}
 };
 
-
-template<class T>
+template <class T>
 static void StreamToXMLMachine(XMLStateMachine<T> &machine, mz_zip_archive &archive, int sheet_idx) {
 	// Stream the file into the parser, chunk by chunk
-	mz_zip_reader_extract_to_callback(&archive, sheet_idx,
-	    [](void *user_data, mz_uint64 file_offset, const void *input_buffer, size_t n){
-		    auto &parser = *static_cast<XMLStateMachine<T>*>(user_data);
-		    auto status = parser.Parse(static_cast<const char*>(input_buffer), n, false);
-			if(status == XMLParseResult::ABORTED) {
+	mz_zip_reader_extract_to_callback(
+	    &archive, sheet_idx,
+	    [](void *user_data, mz_uint64 file_offset, const void *input_buffer, size_t n) {
+		    auto &parser = *static_cast<XMLStateMachine<T> *>(user_data);
+		    auto status = parser.Parse(static_cast<const char *>(input_buffer), n, false);
+		    if (status == XMLParseResult::ABORTED) {
 			    // Stop the extraction
 			    return static_cast<size_t>(n);
-		    } else if(status != XMLParseResult::OK && status != XMLParseResult::DONE) {
+		    } else if (status != XMLParseResult::OK && status != XMLParseResult::DONE) {
 			    // We dont support suspending parsers here
 			    throw InvalidInputException("Unexpected XML parse result: %d", status);
 		    }
 		    return n;
-	    }, &machine, 0);
+	    },
+	    &machine, 0);
 
 	machine.Parse(nullptr, 0, true);
 }
@@ -75,6 +76,7 @@ class SparseStringTableParser : public XMLStateMachine<SparseStringTableParser> 
 	bool in_t_tag = false;
 	idx_t current_string_idx = 0;
 	vector<char> char_buffer;
+
 public:
 	// The indices of the strings we want to fetch
 	unordered_set<idx_t> requested_string_indices;
@@ -83,20 +85,20 @@ public:
 	unordered_map<idx_t, string> string_table;
 
 	void OnStartElement(const char *name, const char **atts) {
-		if(strcmp(name, "t") == 0) {
+		if (strcmp(name, "t") == 0) {
 			in_t_tag = true;
 			return;
 		}
 	}
 
 	void OnEndElement(const char *name) {
-		if(strcmp(name, "t") == 0) {
+		if (strcmp(name, "t") == 0) {
 			in_t_tag = false;
-			if(requested_string_indices.find(current_string_idx) != requested_string_indices.end()) {
+			if (requested_string_indices.find(current_string_idx) != requested_string_indices.end()) {
 				// We care about this string
 				string_table.emplace(current_string_idx, string(char_buffer.data(), char_buffer.size()));
 				requested_string_indices.erase(current_string_idx);
-				if(requested_string_indices.empty()) {
+				if (requested_string_indices.empty()) {
 					// We're done
 					Stop();
 				}
@@ -109,7 +111,7 @@ public:
 	}
 
 	void OnCharacterData(const char *s, int len) {
-		if(in_t_tag) {
+		if (in_t_tag) {
 			char_buffer.insert(char_buffer.end(), s, s + len);
 		}
 	}
@@ -124,16 +126,17 @@ class DenseStringTableParser : public XMLStateMachine<DenseStringTableParser> {
 	bool in_t_tag = false;
 	idx_t current_string_idx = 0;
 	vector<char> char_buffer;
+
 public:
 	vector<string> string_table;
 
 	void OnStartElement(const char *name, const char **atts) {
-		if(strcmp(name, "t") == 0) {
+		if (strcmp(name, "t") == 0) {
 			in_t_tag = true;
 			return;
 		}
 
-		if(strcmp(name, "sst") == 0) {
+		if (strcmp(name, "sst") == 0) {
 			// Optimization: look for the "uniqueCount" attribute value
 			// and reserve space for that many strings
 			for (int i = 0; atts[i]; i += 2) {
@@ -149,7 +152,7 @@ public:
 	}
 
 	void OnEndElement(const char *name) {
-		if(strcmp(name, "t") == 0) {
+		if (strcmp(name, "t") == 0) {
 			in_t_tag = false;
 			string_table.emplace_back(char_buffer.data(), char_buffer.size());
 			char_buffer.clear();
@@ -159,7 +162,7 @@ public:
 	}
 
 	void OnCharacterData(const char *s, int len) {
-		if(in_t_tag) {
+		if (in_t_tag) {
 			char_buffer.insert(char_buffer.end(), s, s + len);
 		}
 	}
@@ -169,14 +172,14 @@ public:
 // Sniffer
 //-----------------------------------------------------------------------------
 enum class HeaderMode {
-	ALWAYS,	// Always treat the first row as a header
-	NEVER, 	// Never treat the first row as a header
-	AUTO, 	// Automatically detect if the first row is a header
+	ALWAYS, // Always treat the first row as a header
+	NEVER,  // Never treat the first row as a header
+	AUTO,   // Automatically detect if the first row is a header
 };
 
 static CellType GetCellType(const char **atts) {
-	for(int i = 0; atts[i]; i += 2) {
-		if(strcmp(atts[i], "t") == 0) {
+	for (int i = 0; atts[i]; i += 2) {
+		if (strcmp(atts[i], "t") == 0) {
 			return CellTypes::FromString(atts[i + 1]);
 		}
 	}
@@ -215,29 +218,25 @@ public:
 	vector<string> header_text;
 	vector<CellType> header_types;
 
-	explicit XLSXSniffer(HeaderMode header_mode_p) : header_mode(header_mode_p) { }
+	explicit XLSXSniffer(HeaderMode header_mode_p) : header_mode(header_mode_p) {
+	}
 
 	bool IsInRange() {
-		return has_start_row &&
-		       has_start_column &&
-		       current_row >= start_row &&
-		       current_column >= start_column && (
-		           !has_end_column ||
-		           current_column < end_column
-		       );
+		return has_start_row && has_start_column && current_row >= start_row && current_column >= start_column &&
+		       (!has_end_column || current_column < end_column);
 	}
 
 	void OnStartElement(const char *name, const char **atts) {
-		if(strcmp(name, "row") == 0) {
+		if (strcmp(name, "row") == 0) {
 			in_row = true;
 			return;
 		}
-		if(in_row && strcmp(name, "c") == 0) {
+		if (in_row && strcmp(name, "c") == 0) {
 			in_column = true;
 			parsed_column_type = GetCellType(atts);
 			return;
 		}
-		if(in_column && strcmp(name, "v") == 0) {
+		if (in_column && strcmp(name, "v") == 0) {
 			in_value = true;
 			return;
 		}
@@ -246,25 +245,25 @@ public:
 	void OnColumnEnd() {
 		in_column = false;
 
-		if(!has_start_row && !parsed_column_data.empty()) {
+		if (!has_start_row && !parsed_column_data.empty()) {
 			// We found the first row with data
 			has_start_row = true;
 			start_row = current_row;
 		}
 
-		if(!has_start_column && !parsed_column_data.empty()) {
+		if (!has_start_column && !parsed_column_data.empty()) {
 			// We found the first column with data
 			has_start_column = true;
 			start_column = current_column;
 		}
 
-		if(has_start_column && !has_end_column && parsed_column_data.empty()) {
+		if (has_start_column && !has_end_column && parsed_column_data.empty()) {
 			// We found the last column with data
 			has_end_column = true;
 			end_column = current_column;
 		}
 
-		if(IsInRange()) {
+		if (IsInRange()) {
 			column_text.emplace_back(parsed_column_data.data(), parsed_column_data.size());
 			column_types.emplace_back(parsed_column_type);
 		}
@@ -280,7 +279,7 @@ public:
 
 		// Corner case: if we dont have an end column yet, but we have a row end
 		// surely this is the last column
-		if(has_start_column && !has_end_column) {
+		if (has_start_column && !has_end_column) {
 			has_end_column = true;
 			end_column = current_column;
 		}
@@ -288,16 +287,16 @@ public:
 		current_column = 0;
 
 		// Are we in range?
-		if(has_start_row && current_row > start_row) {
+		if (has_start_row && current_row > start_row) {
 			// Should we continue?
 
-			if(found_header || header_mode == HeaderMode::NEVER) {
+			if (found_header || header_mode == HeaderMode::NEVER) {
 				// No, we're done. We either found a header or we only want the data
 				Stop();
 				return;
 			}
 
-			if(header_mode == HeaderMode::ALWAYS) {
+			if (header_mode == HeaderMode::ALWAYS) {
 				// Yes, we always treat the first row as a header.
 				// So if we haven't found one yet we treat this row as a header and continue
 				found_header = true;
@@ -307,18 +306,18 @@ public:
 				column_types.clear();
 				return;
 			}
-			if(header_mode == HeaderMode::AUTO) {
+			if (header_mode == HeaderMode::AUTO) {
 				// Maybe, we automatically detect if the first row is a header
 				// We do this by checking if the first row is all strings
 				// If it is, we treat it as a header and continue, otherwise stop
 				bool all_strings = true;
-				for(auto &type : column_types) {
-					if(type != CellType::SHARED_STRING && type != CellType::STRING) {
+				for (auto &type : column_types) {
+					if (type != CellType::SHARED_STRING && type != CellType::STRING) {
 						all_strings = false;
 						break;
 					}
 				}
-				if(all_strings) {
+				if (all_strings) {
 					found_header = true;
 					header_text = column_text;
 					header_types = column_types;
@@ -334,30 +333,28 @@ public:
 	}
 
 	void OnEndElement(const char *name) {
-		if(strcmp(name, "row") == 0) {
+		if (strcmp(name, "row") == 0) {
 			OnRowEnd();
 			return;
 		}
 
-		if(in_row && strcmp(name, "c") == 0) {
+		if (in_row && strcmp(name, "c") == 0) {
 			OnColumnEnd();
 			return;
 		}
 
-		if(in_column && strcmp(name, "v") == 0) {
+		if (in_column && strcmp(name, "v") == 0) {
 			in_value = false;
 			return;
 		}
 	}
 
 	void OnCharacterData(const char *s, int len) {
-		if(in_value) {
+		if (in_value) {
 			parsed_column_data.insert(parsed_column_data.end(), s, s + len);
 		}
 	}
 };
-
-
 
 //-----------------------------------------------------------------------------
 // Bind
@@ -399,8 +396,8 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	result->file_name = input.inputs[0].GetValue<string>();
 
 	// Get the sheet name (if any), otherwise use the first sheet
-	for(auto &kv : input.named_parameters) {
-		if(kv.first == "sheet") {
+	for (auto &kv : input.named_parameters) {
+		if (kv.first == "sheet") {
 			result->sheet_name = kv.second.GetValue<string>();
 			break;
 		}
@@ -412,9 +409,9 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	// Now get the sheet dimensions and columns
 	// Get the index of the sheet
 	result->sheet_file_idx = -1;
-	if(result->sheet_name.empty()) {
+	if (result->sheet_name.empty()) {
 		// No sheet name specified, loop over the files and find the first sheet
-		for(auto i = 0; i < mz_zip_reader_get_num_files(&archive.archive); i++) {
+		for (auto i = 0; i < mz_zip_reader_get_num_files(&archive.archive); i++) {
 			mz_zip_archive_file_stat file_stat;
 			mz_zip_reader_file_stat(&archive.archive, i, &file_stat);
 			if (file_stat.m_is_directory) {
@@ -434,13 +431,13 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 		result->sheet_file_idx = mz_zip_reader_locate_file(&archive.archive, sheet_path.c_str(), nullptr, 0);
 	}
 
-	if(result->sheet_file_idx < 0) {
+	if (result->sheet_file_idx < 0) {
 		throw BinderException("Failed to find sheet with name %s", result->sheet_name.c_str());
 	}
 
 	// Get the shared strings file index
 	result->shared_string_file_idx = mz_zip_reader_locate_file(&archive.archive, "xl/sharedStrings.xml", nullptr, 0);
-	if(result->shared_string_file_idx < 0) {
+	if (result->shared_string_file_idx < 0) {
 		throw InvalidInputException("Failed to find shared strings file in xlsx archive");
 	}
 
@@ -476,7 +473,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 				throw BinderException("Invalid header mode: %s", header_mode.c_str());
 			}
 		}
-		if(kv.first == "abort_on_empty_row") {
+		if (kv.first == "abort_on_empty_row") {
 			result->abort_on_empty_row = kv.second.GetValue<bool>();
 		}
 		if (kv.first == "all_varchar") {
@@ -484,14 +481,14 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 		}
 	}
 
-	if(sniffer.has_start_column && sniffer.has_end_column && sniffer.start_column >= sniffer.end_column) {
+	if (sniffer.has_start_column && sniffer.has_end_column && sniffer.start_column >= sniffer.end_column) {
 		throw BinderException("Specified end column %d is less than or equal to the start column %d",
 		                      sniffer.end_column - 1, sniffer.start_column - 1);
 	}
 
 	StreamToXMLMachine(sniffer, archive.archive, result->sheet_file_idx);
 
-	if(sniffer.last_column_index < sniffer.end_column) {
+	if (sniffer.last_column_index < sniffer.end_column) {
 		throw BinderException("Specified end column %d is greater than the number of columns in the sheet %d",
 		                      sniffer.end_column - 1, sniffer.last_column_index - 1);
 	}
@@ -500,7 +497,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	result->range_column_start = sniffer.start_column;
 	result->range_column_end = sniffer.end_column;
 
-	if(sniffer.found_header) {
+	if (sniffer.found_header) {
 		// Skip the header row
 		result->range_row_start += 1;
 	}
@@ -508,18 +505,18 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	// Resolve any shared strings we need
 	SparseStringTableParser string_table_parser;
 
-	for(idx_t i = 0; i < sniffer.column_text.size(); i++) {
+	for (idx_t i = 0; i < sniffer.column_text.size(); i++) {
 		auto &cell_text = sniffer.column_text[i];
 		auto &cell_type = sniffer.column_types[i];
-		if(cell_type == CellType::SHARED_STRING) {
+		if (cell_type == CellType::SHARED_STRING) {
 			auto shared_string_idx = atoi(cell_text.c_str());
 			string_table_parser.requested_string_indices.insert(shared_string_idx);
 		}
 	}
-	for(idx_t i = 0; i < sniffer.header_text.size(); i++) {
+	for (idx_t i = 0; i < sniffer.header_text.size(); i++) {
 		auto &cell_text = sniffer.header_text[i];
 		auto &cell_type = sniffer.header_types[i];
-		if(cell_type == CellType::SHARED_STRING) {
+		if (cell_type == CellType::SHARED_STRING) {
 			auto shared_string_idx = atoi(cell_text.c_str());
 			string_table_parser.requested_string_indices.insert(shared_string_idx);
 		}
@@ -529,15 +526,15 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 
 	// Now bind the actual function
 	// Start with the column names
-	if(sniffer.found_header) {
+	if (sniffer.found_header) {
 		// We found a header, use it to name the column
 		for (idx_t i = 0; i < sniffer.header_text.size(); i++) {
 			auto &header_text = sniffer.header_text[i];
 			auto &header_type = sniffer.header_types[i];
-			if(header_type == CellType::SHARED_STRING) {
+			if (header_type == CellType::SHARED_STRING) {
 				auto shared_string_idx = atoi(header_text.c_str());
 				auto entry = string_table_parser.string_table.find(shared_string_idx);
-				if(entry == string_table_parser.string_table.end()) {
+				if (entry == string_table_parser.string_table.end()) {
 					throw IOException("Failed to find shared string with index %d", shared_string_idx);
 				}
 				header_text = entry->second;
@@ -546,17 +543,17 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 		}
 	} else {
 		// Else, use the column indices
-		for(idx_t i = 0; i < sniffer.column_text.size(); i++) {
+		for (idx_t i = 0; i < sniffer.column_text.size(); i++) {
 			names.push_back("col" + std::to_string(i));
 		}
 	}
 
 	// Now the return types
-	if(treat_all_fields_as_varchar) {
+	if (treat_all_fields_as_varchar) {
 		return_types = vector<LogicalType>(sniffer.column_text.size(), LogicalType::VARCHAR);
 	} else {
 		// Use the types from the sniffer
-		for(idx_t i = 0; i < sniffer.column_text.size(); i++) {
+		for (idx_t i = 0; i < sniffer.column_text.size(); i++) {
 			auto &cell_type = sniffer.column_types[i];
 			return_types.push_back(CellTypes::GetType(cell_type));
 		}
@@ -599,9 +596,9 @@ struct SheetParser : public XMLStateMachine<SheetParser> {
 	DataChunk payload_chunk;
 
 	void OnStartElement(const char *name, const char **atts) {
-		if(!in_row && strcmp(name, "row") == 0) {
+		if (!in_row && strcmp(name, "row") == 0) {
 			in_row = true;
-			if(read_row_count >= STANDARD_VECTOR_SIZE) {
+			if (read_row_count >= STANDARD_VECTOR_SIZE) {
 				// We're done for now, yield the chunk
 				Suspend();
 				return;
@@ -609,27 +606,27 @@ struct SheetParser : public XMLStateMachine<SheetParser> {
 			in_row_range = current_row >= range_row_start;
 			return;
 		}
-		if(in_row && strcmp(name, "c") == 0) {
+		if (in_row && strcmp(name, "c") == 0) {
 			in_col = true;
-			in_col_range =  current_col >= range_column_start && current_col < range_column_end;
-			if(in_row_range && in_col_range) {
+			in_col_range = current_col >= range_column_start && current_col < range_column_end;
+			if (in_row_range && in_col_range) {
 				current_cell_type = GetCellType(atts);
 			}
 			return;
 		}
-		if(in_col_range && in_row_range && strcmp(name, "v") == 0) {
+		if (in_col_range && in_row_range && strcmp(name, "v") == 0) {
 			in_value = true;
 			return;
 		}
 	}
 
 	void OnEndElement(const char *name) {
-		if(in_row && strcmp(name, "row") == 0) {
+		if (in_row && strcmp(name, "row") == 0) {
 			in_row = false;
 			current_row++;
 			current_col = 0;
-			if(in_row_range) {
-				if(!row_had_data && abort_on_empty_row) {
+			if (in_row_range) {
+				if (!row_had_data && abort_on_empty_row) {
 					// This row had no data. Abort
 					Stop();
 					return;
@@ -639,26 +636,27 @@ struct SheetParser : public XMLStateMachine<SheetParser> {
 			}
 			return;
 		}
-		if(in_col && strcmp(name, "c") == 0) {
+		if (in_col && strcmp(name, "c") == 0) {
 			in_col = false;
 
-			if(in_row_range && in_col_range) {
+			if (in_row_range && in_col_range) {
 				// We're in range, add the value to the payload chunk
 				auto col_idx = current_col - range_column_start;
 				auto row_idx = read_row_count;
 				auto &output_vector = payload_chunk.data[col_idx];
 				auto output_data_ptr = FlatVector::GetData<string_t>(output_vector);
 
-				if(char_buffer.empty()) {
+				if (char_buffer.empty()) {
 					FlatVector::SetNull(output_vector, row_idx, true);
-				} else if(current_cell_type == CellType::SHARED_STRING) {
+				} else if (current_cell_type == CellType::SHARED_STRING) {
 					row_had_data = true;
 					auto shared_string_idx = atoi(string(char_buffer.data(), char_buffer.size()).c_str());
 					auto entry = string_table[shared_string_idx];
 					output_data_ptr[row_idx] = StringVector::AddString(output_vector, entry);
 				} else {
 					row_had_data = true;
-					output_data_ptr[row_idx] = StringVector::AddString(output_vector, char_buffer.data(), char_buffer.size());
+					output_data_ptr[row_idx] =
+					    StringVector::AddString(output_vector, char_buffer.data(), char_buffer.size());
 				}
 
 				// Reset the buffer
@@ -668,14 +666,14 @@ struct SheetParser : public XMLStateMachine<SheetParser> {
 			current_col++;
 			return;
 		}
-		if(in_value && strcmp(name, "v") == 0) {
+		if (in_value && strcmp(name, "v") == 0) {
 			in_value = false;
 			return;
 		}
 	}
 
 	void OnCharacterData(const char *s, int len) {
-		if(in_value) {
+		if (in_value) {
 			char_buffer.insert(char_buffer.end(), s, s + len);
 		}
 	}
@@ -688,7 +686,7 @@ struct SheetParser : public XMLStateMachine<SheetParser> {
 
 	State machine_state = State::READING;
 
-	DataChunk& GetPayloadChunk() {
+	DataChunk &GetPayloadChunk() {
 		return payload_chunk;
 	}
 
@@ -706,7 +704,7 @@ struct SheetParser : public XMLStateMachine<SheetParser> {
 		read_row_count = 0;
 		payload_chunk.Reset();
 
-		while(true) {
+		while (true) {
 			switch (machine_state) {
 			case State::READING: {
 				auto read_bytes = mz_zip_reader_extract_iter_read(mz_state, buffer, sizeof(buffer));
@@ -734,7 +732,7 @@ struct SheetParser : public XMLStateMachine<SheetParser> {
 						// Move over to the read state
 						machine_state = State::READING;
 					}
-				} else if(status == XMLParseResult::ABORTED) {
+				} else if (status == XMLParseResult::ABORTED) {
 					// Early abort
 					machine_state = State::DONE;
 					payload_chunk.SetCardinality(read_row_count);
@@ -797,8 +795,8 @@ static void Execute(ClientContext &context, TableFunctionInput &data_p, DataChun
 	auto count = global_state.sheet_parser->Execute();
 	auto &payload = global_state.sheet_parser->GetPayloadChunk();
 
-	for(idx_t i = 0; i < output.ColumnCount(); i++) {
-		if(output.data[i].GetType() == payload.data[i].GetType()) {
+	for (idx_t i = 0; i < output.ColumnCount(); i++) {
+		if (output.data[i].GetType() == payload.data[i].GetType()) {
 			// Types are the same, just move the data
 			output.data[i].Reference(payload.data[i]);
 		} else {

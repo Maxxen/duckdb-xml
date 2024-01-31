@@ -55,7 +55,8 @@ struct CentralDirectoryFileHeader {
 		stream.ReadData(data_ptr_cast(&header.disk_number_start), sizeof(header.disk_number_start));
 		stream.ReadData(data_ptr_cast(&header.internal_file_attributes), sizeof(header.internal_file_attributes));
 		stream.ReadData(data_ptr_cast(&header.external_file_attributes), sizeof(header.external_file_attributes));
-		stream.ReadData(data_ptr_cast(&header.relative_offset_of_local_header), sizeof(header.relative_offset_of_local_header));
+		stream.ReadData(data_ptr_cast(&header.relative_offset_of_local_header),
+		                sizeof(header.relative_offset_of_local_header));
 
 		vector<char> buffer(header.file_name_length);
 		stream.ReadData(data_ptr_cast(buffer.data()), header.file_name_length);
@@ -88,7 +89,7 @@ struct LocalFileHeader {
 	string file_name;
 	string extra_field;
 
-	static LocalFileHeader Read(ReadStream& stream) {
+	static LocalFileHeader Read(ReadStream &stream) {
 		LocalFileHeader header;
 		stream.ReadData(data_ptr_cast(&header.signature), sizeof(header.signature));
 		stream.ReadData(data_ptr_cast(&header.version_needed_to_extract), sizeof(header.version_needed_to_extract));
@@ -149,14 +150,14 @@ struct MzStream : ReadStream {
 	}
 };
 
-
 #define EXCEL_BUFFER_SIZE 4096
 struct ExcelParseState {
 	data_t buffer[EXCEL_BUFFER_SIZE];
 	unique_ptr<ReadStream> stream;
 	XML_Parser parser;
 
-	explicit ExcelParseState(unique_ptr<ReadStream> stream) : stream(std::move(stream)), parser(XML_ParserCreate(nullptr)) {
+	explicit ExcelParseState(unique_ptr<ReadStream> stream)
+	    : stream(std::move(stream)), parser(XML_ParserCreate(nullptr)) {
 	}
 
 	void Next() {
@@ -191,12 +192,11 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 		}
 	}
 
-
 	auto &fs = FileSystem::GetFileSystem(context);
 	/*
 	auto file = fs.OpenFile(result->file_name, FileFlags::FILE_FLAGS_READ);
 	if (!file) {
-		throw IOException("Failed to open file %s", result->file_name.c_str());
+	    throw IOException("Failed to open file %s", result->file_name.c_str());
 	}
 	 */
 
@@ -226,13 +226,13 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	memcpy(&offset_of_start_of_central_directory, oecd_buffer + 16, 4);
 	memcpy(&comment_length, oecd_buffer + 20, 2);
 
-	if(signature != 0x06054b50) {
+	if (signature != 0x06054b50) {
 		throw IOException("Invalid signature");
 	}
-	if(disk_number != disk_number_with_start_of_central_directory) {
+	if (disk_number != disk_number_with_start_of_central_directory) {
 		throw IOException("DuckDB does not support multi-disk archives");
 	}
-	if(number_of_entries_in_central_directory_on_this_disk != number_of_entries_in_central_directory) {
+	if (number_of_entries_in_central_directory_on_this_disk != number_of_entries_in_central_directory) {
 		throw IOException("DuckDB does not support multi-disk archives");
 	}
 
@@ -247,7 +247,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 		auto save_offset = reader.CurrentOffset();
 
 		auto embedded_file_name = central_header.file_name;
-		if(embedded_file_name == "xl/sharedStrings.xml") {
+		if (embedded_file_name == "xl/sharedStrings.xml") {
 			printf("Found shared strings");
 		}
 
@@ -268,49 +268,43 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 		}
 		reader.Seek(save_offset);
 	}
-	if(!found_sheet) {
-		if(found_sheets.empty()) {
+	if (!found_sheet) {
+		if (found_sheets.empty()) {
 			throw IOException("No worksheets found");
 		} else {
-			throw IOException("Worksheet %s not found, found sheets: %s", result->sheet_name.c_str(), StringUtil::Join(found_sheets, ", ").c_str());
+			throw IOException("Worksheet %s not found, found sheets: %s", result->sheet_name.c_str(),
+			                  StringUtil::Join(found_sheets, ", ").c_str());
 		}
 	}
 
 	unique_ptr<ReadStream> stream;
-	if(local_header.compression_method == 8) {
+	if (local_header.compression_method == 8) {
 		stream = make_uniq<MzStream>(reader);
-	} else if(local_header.compression_method == 0) {
+	} else if (local_header.compression_method == 0) {
 		stream = make_uniq<BufferedFileReader>(std::move(reader));
 	} else {
 		throw IOException("Unsupported compression method");
 	}
 
-
 	ExcelParseState state(std::move(stream));
-	XML_SetElementHandler(state.parser,
-	    [](void* user_data, const char* name, const char *args[]) {
+	XML_SetElementHandler(
+	    state.parser,
+	    [](void *user_data, const char *name, const char *args[]) {
 		    printf("Begin element: %s\n", name);
-		    while(*args) {
-			    printf("Arg %s=%s\n", *args, *(args+1));
+		    while (*args) {
+			    printf("Arg %s=%s\n", *args, *(args + 1));
 			    args += 2;
 		    }
 	    },
-	    [](void* user_data, const char* name) {
-		    printf("End element: %s\n", name);
-	    }
-	);
-	XML_SetCharacterDataHandler(state.parser,
-	                            [](void* user_data, const char* str, int len) {
-		                            printf("Character data: %s\n", string(str, len).c_str());
-	                            }
-	);
+	    [](void *user_data, const char *name) { printf("End element: %s\n", name); });
+	XML_SetCharacterDataHandler(state.parser, [](void *user_data, const char *str, int len) {
+		printf("Character data: %s\n", string(str, len).c_str());
+	});
 
 	state.Next();
 
-	//XML_Parse(parser, str.c_str(), str.size(), 1);
-	//XML_ParserFree(parser);
-
-
+	// XML_Parse(parser, str.c_str(), str.size(), 1);
+	// XML_ParserFree(parser);
 
 	// After the header is the data in of "compressed_size" bytes
 
@@ -323,29 +317,29 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	// Compression method 8 = deflate
 	// deflate the data
 	if (local_header.compression_method == 8) {
-		duckdb_miniz::mz_stream stream;
-		memset(&stream, 0, sizeof(stream));
-		auto mz_ret = duckdb_miniz::mz_inflateInit2(&stream, -MZ_DEFAULT_WINDOW_BITS);
-		if (mz_ret != duckdb_miniz::MZ_OK) {
-			throw IOException("Failed to initialize miniz");
-		}
+	    duckdb_miniz::mz_stream stream;
+	    memset(&stream, 0, sizeof(stream));
+	    auto mz_ret = duckdb_miniz::mz_inflateInit2(&stream, -MZ_DEFAULT_WINDOW_BITS);
+	    if (mz_ret != duckdb_miniz::MZ_OK) {
+	        throw IOException("Failed to initialize miniz");
+	    }
 
-		stream.next_in = compressed_buffer.data();
-		stream.avail_in = local_header.compressed_size;
-		stream.next_out = uncompressed_buffer.data();
-		stream.avail_out = local_header.uncompressed_size;
-		mz_ret = duckdb_miniz::mz_inflate(&stream, duckdb_miniz::MZ_FINISH);
-		if (mz_ret != duckdb_miniz::MZ_STREAM_END) {
-			throw IOException("Failed to inflate miniz");
-		}
-		mz_ret = duckdb_miniz::mz_inflateEnd(&stream);
-		if (mz_ret != duckdb_miniz::MZ_OK) {
-			throw IOException("Failed to end miniz");
-		}
+	    stream.next_in = compressed_buffer.data();
+	    stream.avail_in = local_header.compressed_size;
+	    stream.next_out = uncompressed_buffer.data();
+	    stream.avail_out = local_header.uncompressed_size;
+	    mz_ret = duckdb_miniz::mz_inflate(&stream, duckdb_miniz::MZ_FINISH);
+	    if (mz_ret != duckdb_miniz::MZ_STREAM_END) {
+	        throw IOException("Failed to inflate miniz");
+	    }
+	    mz_ret = duckdb_miniz::mz_inflateEnd(&stream);
+	    if (mz_ret != duckdb_miniz::MZ_OK) {
+	        throw IOException("Failed to end miniz");
+	    }
 	} else if (local_header.compression_method == 0) {
-		memcpy(uncompressed_buffer.data(), compressed_buffer.data(), local_header.uncompressed_size);
+	    memcpy(uncompressed_buffer.data(), compressed_buffer.data(), local_header.uncompressed_size);
 	} else {
-		throw IOException("Unsupported compression method");
+	    throw IOException("Unsupported compression method");
 	}
 	auto str = string(char_ptr_cast(uncompressed_buffer.data()), local_header.uncompressed_size);
 	printf("File name: %s, size: %d\n", local_header.file_name.c_str(), local_header.uncompressed_size);
@@ -356,20 +350,20 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	//XML_SetUserData(parser, &result->sheet_name);
 	XML_SetElementHandler(parser,
 	    [](void* user_data, const char* name, const char *args[]) {
-			printf("Begin element: %s\n", name);
-		    while(*args) {
-				printf("Arg %s=%s\n", *args, *(args+1));
-				args += 2;
-		    }
-		},
+	        printf("Begin element: %s\n", name);
+	        while(*args) {
+	            printf("Arg %s=%s\n", *args, *(args+1));
+	            args += 2;
+	        }
+	    },
 	    [](void* user_data, const char* name) {
-			printf("End element: %s\n", name);
-		}
- 	);
+	        printf("End element: %s\n", name);
+	    }
+	);
 	XML_SetCharacterDataHandler(parser,
 	    [](void* user_data, const char* str, int len) {
-			printf("Character data: %s\n", string(str, len).c_str());
-		}
+	        printf("Character data: %s\n", string(str, len).c_str());
+	    }
 	);
 
 	XML_Parse(parser, str.c_str(), str.size(), 1);
@@ -384,9 +378,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 //-----------------------------------------------------------------------------
 // Init Global
 //-----------------------------------------------------------------------------
-struct XLSXReaderGlobalData : public GlobalTableFunctionState {
-
-};
+struct XLSXReaderGlobalData : public GlobalTableFunctionState {};
 
 static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, TableFunctionInitInput &input) {
 	auto result = make_uniq<XLSXReaderGlobalData>();
@@ -397,7 +389,6 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 // Execute
 //-----------------------------------------------------------------------------
 static void Execute(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-
 }
 
 //-----------------------------------------------------------------------------
@@ -430,11 +421,9 @@ void XLSXReader::Register(DatabaseInstance &db) {
 
 } // namespace duckdb
 
-
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-
 
 struct BindParseState {
 	CellRange dimensions = CellRange();
@@ -461,8 +450,9 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 	auto parser = XML_ParserCreate(nullptr);
 	XML_SetUserData(parser, &state);
 
-	XML_SetElementHandler(parser,
-	    [](void *user_data, const XML_Char *name, const XML_Char **atts){
+	XML_SetElementHandler(
+	    parser,
+	    [](void *user_data, const XML_Char *name, const XML_Char **atts) {
 		    auto state = static_cast<BindParseState *>(user_data);
 		    /* // TODO: We dont care about this now, could be an optimization later
 		    // <dimension> tag contains the dimensions of the sheet
@@ -481,13 +471,13 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 		    */
 
 		    // Check if we are in the first row
-		    if(strcmp(name, "row") == 0) {
+		    if (strcmp(name, "row") == 0) {
 			    // Extract the "r" attribute value
 			    for (int i = 0; atts[i]; i += 2) {
 				    if ((strcmp(atts[i], "r") == 0)) {
 					    // Extract the row number from the "r" attribute value
 					    auto row = atoi(atts[i + 1]) - 1; // 0 index
-					    if(row == 0) {
+					    if (row == 0) {
 						    state->in_first_row = true;
 					    }
 				    }
@@ -496,7 +486,7 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 		    }
 
 		    // Inside a column
-		    if(state->in_first_row) {
+		    if (state->in_first_row) {
 			    if (strcmp(name, "c") == 0) {
 				    state->in_cell = true;
 				    // Extract the "r" attribute value
@@ -525,18 +515,18 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 			    }
 		    }
 	    },
-	    [](void *user_data, const XML_Char *name){
+	    [](void *user_data, const XML_Char *name) {
 		    auto state = static_cast<BindParseState *>(user_data);
 
 		    // Once we exit the first row, we're done
-		    if(strcmp(name, "row") == 0) {
-			    if(state->in_first_row) {
+		    if (strcmp(name, "row") == 0) {
+			    if (state->in_first_row) {
 				    state->in_first_row = false;
 				    state->is_done = true;
 			    }
 			    return;
 		    }
-		    if(state->in_first_row) {
+		    if (state->in_first_row) {
 			    if (strcmp(name, "c") == 0) {
 				    state->in_cell = false;
 				    return;
@@ -549,30 +539,31 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 		    }
 	    });
 
-	XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len){
-		auto &state = *static_cast<BindParseState*>(user_data);
-		if(state.in_first_row && state.in_cell_value) {
+	XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len) {
+		auto &state = *static_cast<BindParseState *>(user_data);
+		if (state.in_first_row && state.in_cell_value) {
 			// Parse the input buffer
 			state.header_values.emplace_back(s, len);
 		}
 	});
 
 	// Stream the file into the parser, chunk by chunk
-	mz_zip_reader_extract_to_callback(&archive, sheet_idx,
-	    [](void *user_data, mz_uint64 file_offset, const void *input_buffer, size_t n){
-		    auto parser = *static_cast<XML_Parser*>(user_data);
-		    auto state = static_cast<BindParseState*>(XML_GetUserData(parser));
-		    if(state->is_done) {
+	mz_zip_reader_extract_to_callback(
+	    &archive, sheet_idx,
+	    [](void *user_data, mz_uint64 file_offset, const void *input_buffer, size_t n) {
+		    auto parser = *static_cast<XML_Parser *>(user_data);
+		    auto state = static_cast<BindParseState *>(XML_GetUserData(parser));
+		    if (state->is_done) {
 			    // Return 0 to indicate we're done
 			    return static_cast<size_t>(0);
 		    }
 		    // Parse the input buffer
-		    XML_Parse(parser, static_cast<const char*>(input_buffer), n, false);
+		    XML_Parse(parser, static_cast<const char *>(input_buffer), n, false);
 
 		    // Return the number of bytes we parsed
 		    return n;
-
-	    }, &parser, 0);
+	    },
+	    &parser, 0);
 	// Do a final parse to flush the parser
 	XML_Parse(parser, nullptr, 0, true);
 
@@ -582,12 +573,12 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 	// Now check if the first row is a header
 	bool header_detected = true;
 	bool header_has_shared_string = false;
-	for(auto &cell : state.header_types) {
-		if(cell == CellType::SHARED_STRING) {
+	for (auto &cell : state.header_types) {
+		if (cell == CellType::SHARED_STRING) {
 			header_has_shared_string = true;
 			continue;
 		}
-		if(cell == CellType::STRING) {
+		if (cell == CellType::STRING) {
 			continue;
 		}
 		// One of the types is not a string, so there is _probably_ no header
@@ -597,14 +588,14 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 
 	auto result = make_uniq<SheetInfo>();
 
-	if(header_detected) {
+	if (header_detected) {
 		result->has_header = true;
-		if(header_has_shared_string) {
+		if (header_has_shared_string) {
 			// We need to scan the shared strings table to get the header values
 			unordered_set<idx_t> wanted_indices;
-			for(idx_t i = 0; i < state.header_values.size(); i++) {
+			for (idx_t i = 0; i < state.header_values.size(); i++) {
 				auto &cell = state.header_values[i];
-				if(state.header_types[i] == CellType::SHARED_STRING) {
+				if (state.header_types[i] == CellType::SHARED_STRING) {
 					auto index = atoi(cell.c_str());
 					wanted_indices.insert(index);
 				}
@@ -614,9 +605,9 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 			unordered_map<idx_t, string> string_table;
 			ScanSharedStringsByIndex(string_table, std::move(wanted_indices), archive);
 
-			for(idx_t i = 0; i < state.header_values.size(); i++) {
+			for (idx_t i = 0; i < state.header_values.size(); i++) {
 				auto &cell = state.header_values[i];
-				if(state.header_types[i] == CellType::SHARED_STRING) {
+				if (state.header_types[i] == CellType::SHARED_STRING) {
 					auto index = atoi(cell.c_str());
 					result->column_names.push_back(string_table[index]);
 				} else {
@@ -637,13 +628,12 @@ static unique_ptr<SheetInfo> GetSheetInfo(mz_zip_archive &archive, int sheet_idx
 		}
 	}
 
-	for(auto &cell : state.header_types) {
+	for (auto &cell : state.header_types) {
 		result->column_types.push_back(CellTypes::GetType(cell));
 	}
 
 	return result;
 }
-
 
 /*
 static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindInput &input,
@@ -655,9 +645,9 @@ result->file_name = input.inputs[0].GetValue<string>();
 
 // Get the sheet name
 for(auto &kv : input.named_parameters) {
-	if(kv.first == "sheet") {
-		result->sheet_name = kv.second.GetValue<string>();
-	}
+    if(kv.first == "sheet") {
+        result->sheet_name = kv.second.GetValue<string>();
+    }
 }
 
 auto &fs = FileSystem::GetFileSystem(context);
@@ -668,29 +658,29 @@ MzZipArchive archive(fs.OpenFile(result->file_name, FileFlags::FILE_FLAGS_READ))
 // Get the index of the sheet
 result->sheet_file_idx = -1;
 if(result->sheet_name.empty()) {
-	// No sheet name specified, loop over the files and find the first sheet
-	for(auto i = 0; i < mz_zip_reader_get_num_files(&archive.archive); i++) {
-		mz_zip_archive_file_stat file_stat;
-		mz_zip_reader_file_stat(&archive.archive, i, &file_stat);
-		if (file_stat.m_is_directory) {
-			continue;
-		}
-		auto file_path = string(file_stat.m_filename);
-		if (StringUtil::StartsWith(file_path, "xl/worksheets/") && StringUtil::EndsWith(file_path, ".xml")) {
-			// Found a sheet file
-			result->sheet_file_idx = i;
-			result->sheet_name = file_path.substr(15, file_path.size() - 19);
-			break;
-		}
-	}
+    // No sheet name specified, loop over the files and find the first sheet
+    for(auto i = 0; i < mz_zip_reader_get_num_files(&archive.archive); i++) {
+        mz_zip_archive_file_stat file_stat;
+        mz_zip_reader_file_stat(&archive.archive, i, &file_stat);
+        if (file_stat.m_is_directory) {
+            continue;
+        }
+        auto file_path = string(file_stat.m_filename);
+        if (StringUtil::StartsWith(file_path, "xl/worksheets/") && StringUtil::EndsWith(file_path, ".xml")) {
+            // Found a sheet file
+            result->sheet_file_idx = i;
+            result->sheet_name = file_path.substr(15, file_path.size() - 19);
+            break;
+        }
+    }
 } else {
-	// Find the sheet with the given name
-	auto sheet_path = "xl/worksheets/" + result->sheet_name + ".xml";
-	result->sheet_file_idx = mz_zip_reader_locate_file(&archive.archive, sheet_path.c_str(), nullptr, 0);
+    // Find the sheet with the given name
+    auto sheet_path = "xl/worksheets/" + result->sheet_name + ".xml";
+    result->sheet_file_idx = mz_zip_reader_locate_file(&archive.archive, sheet_path.c_str(), nullptr, 0);
 }
 
 if(result->sheet_file_idx < 0) {
-	throw BinderException("Failed to find sheet with name %s", result->sheet_name.c_str());
+    throw BinderException("Failed to find sheet with name %s", result->sheet_name.c_str());
 }
 
 auto info = GetSheetInfo(archive.archive, result->sheet_file_idx);
@@ -703,8 +693,6 @@ return std::move(result);
 }
 */
 
-
-
 struct FetchStringsState {
 	bool is_done = false;
 	bool in_t_tag = false;
@@ -714,16 +702,15 @@ struct FetchStringsState {
 	// Result data
 	unordered_map<idx_t, string> &string_table;
 	explicit FetchStringsState(unordered_map<idx_t, string> &string_table_p, unordered_set<idx_t> indices_p)
-	    : requested_string_indices(std::move(indices_p))
-	      , string_table(string_table_p)
-	{
+	    : requested_string_indices(std::move(indices_p)), string_table(string_table_p) {
 	}
 };
 
-static void ScanSharedStringsByIndex(unordered_map<idx_t, string> &result_string_table, unordered_set<idx_t> indices, mz_zip_archive &archive) {
+static void ScanSharedStringsByIndex(unordered_map<idx_t, string> &result_string_table, unordered_set<idx_t> indices,
+                                     mz_zip_archive &archive) {
 	// Find the shared string table
 	auto string_table_idx = mz_zip_reader_locate_file(&archive, "xl/sharedStrings.xml", nullptr, 0);
-	if(string_table_idx < 0) {
+	if (string_table_idx < 0) {
 		throw IOException("Failed to find shared string table");
 	}
 
@@ -733,25 +720,28 @@ static void ScanSharedStringsByIndex(unordered_map<idx_t, string> &result_string
 	auto parser = XML_ParserCreate(nullptr);
 	XML_SetUserData(parser, &state);
 
-	XML_SetElementHandler(parser, [](void *user_data, const XML_Char *name, const XML_Char **atts){
-		    auto state = static_cast<FetchStringsState*>(user_data);
-		    if(strcmp(name, "t") == 0) {
+	XML_SetElementHandler(
+	    parser,
+	    [](void *user_data, const XML_Char *name, const XML_Char **atts) {
+		    auto state = static_cast<FetchStringsState *>(user_data);
+		    if (strcmp(name, "t") == 0) {
 			    state->in_t_tag = true;
 			    return;
 		    }
-	    }, [](void *user_data, const XML_Char *name){
-		    auto state = static_cast<FetchStringsState*>(user_data);
-		    if(strcmp(name, "t") == 0) {
+	    },
+	    [](void *user_data, const XML_Char *name) {
+		    auto state = static_cast<FetchStringsState *>(user_data);
+		    if (strcmp(name, "t") == 0) {
 			    state->in_t_tag = false;
 			    state->current_string_idx++;
 			    return;
 		    }
 	    });
-	XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len){
-		auto &state = *static_cast<FetchStringsState*>(user_data);
-		if(state.in_t_tag) {
+	XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len) {
+		auto &state = *static_cast<FetchStringsState *>(user_data);
+		if (state.in_t_tag) {
 			auto current_idx = state.current_string_idx;
-			if(state.requested_string_indices.find(current_idx) == state.requested_string_indices.end()) {
+			if (state.requested_string_indices.find(current_idx) == state.requested_string_indices.end()) {
 				// We don't care about this string
 				return;
 			} else {
@@ -759,7 +749,7 @@ static void ScanSharedStringsByIndex(unordered_map<idx_t, string> &result_string
 				state.requested_string_indices.erase(current_idx);
 				state.string_table[current_idx] = string(s, len);
 
-				if(state.requested_string_indices.empty()) {
+				if (state.requested_string_indices.empty()) {
 					// We're done
 					state.is_done = true;
 				}
@@ -768,21 +758,22 @@ static void ScanSharedStringsByIndex(unordered_map<idx_t, string> &result_string
 	});
 
 	// Stream the file into the parser, chunk by chunk
-	mz_zip_reader_extract_to_callback(&archive, string_table_idx,
-	    [](void *user_data, mz_uint64 file_offset, const void *input_buffer, size_t n){
-		    auto parser = *static_cast<XML_Parser*>(user_data);
-		    auto state = static_cast<FetchStringsState*>(XML_GetUserData(parser));
-		    if(state->is_done) {
+	mz_zip_reader_extract_to_callback(
+	    &archive, string_table_idx,
+	    [](void *user_data, mz_uint64 file_offset, const void *input_buffer, size_t n) {
+		    auto parser = *static_cast<XML_Parser *>(user_data);
+		    auto state = static_cast<FetchStringsState *>(XML_GetUserData(parser));
+		    if (state->is_done) {
 			    // Return 0 to indicate we're done
 			    return static_cast<size_t>(0);
 		    }
 		    // Parse the input buffer
-		    XML_Parse(parser, static_cast<const char*>(input_buffer), n, false);
+		    XML_Parse(parser, static_cast<const char *>(input_buffer), n, false);
 
 		    // Return the number of bytes we parsed
 		    return n;
-
-	    }, &parser, 0);
+	    },
+	    &parser, 0);
 
 	// Do a last parse to flush the parser
 	XML_Parse(parser, nullptr, 0, true);
@@ -790,7 +781,6 @@ static void ScanSharedStringsByIndex(unordered_map<idx_t, string> &result_string
 	// Free the parser
 	XML_ParserFree(parser);
 }
-
 
 /*
 struct StateMachine {
@@ -819,154 +809,154 @@ XML_Parser parser;
 
 // Takes ownership of the mz_state
 explicit StateMachine(ClientContext &context, mz_zip_reader_extract_iter_state* mz_state_p, idx_t column_count) {
-	machine_state = State::READING;
-	read_byte_size = 0;
-	read_row_count = 0;
-	last_read_size = 0;
-	parser = XML_ParserCreate(nullptr);
-	mz_state = mz_state_p;
+    machine_state = State::READING;
+    read_byte_size = 0;
+    read_row_count = 0;
+    last_read_size = 0;
+    parser = XML_ParserCreate(nullptr);
+    mz_state = mz_state_p;
 
-	total_byte_size = mz_state->file_stat.m_uncomp_size;
+    total_byte_size = mz_state->file_stat.m_uncomp_size;
 
-	in_row_tag = false;
-	in_cell_tag = false;
-	in_cell_value_tag = false;
-	current_row = 0;
-	current_col = 0;
-	current_cell_type = CellType::NUMBER;
+    in_row_tag = false;
+    in_cell_tag = false;
+    in_cell_value_tag = false;
+    current_row = 0;
+    current_col = 0;
+    current_cell_type = CellType::NUMBER;
 
-	// We use a payload chunk to store the parsed data
-	payload_chunk.Initialize(context, vector<LogicalType>(column_count, LogicalType::VARCHAR));
+    // We use a payload chunk to store the parsed data
+    payload_chunk.Initialize(context, vector<LogicalType>(column_count, LogicalType::VARCHAR));
 
-	// Set the user data to this state machine
-	XML_SetUserData(parser, this);
+    // Set the user data to this state machine
+    XML_SetUserData(parser, this);
 
-	// Handle tags
-	XML_SetElementHandler(parser,
-	    [](void *user_data, const XML_Char *name, const XML_Char **atts){
-		    auto &state = *static_cast<StateMachine*>(user_data);
-		    if(strcmp(name, "row") == 0) {
-			    state.in_row_tag = true;
-			    return;
-		    }
-		    if(strcmp(name, "c") == 0) {
-			    state.in_cell_tag = true;
-			    // Default to number
-			    state.current_cell_type = CellType::NUMBER;
+    // Handle tags
+    XML_SetElementHandler(parser,
+        [](void *user_data, const XML_Char *name, const XML_Char **atts){
+            auto &state = *static_cast<StateMachine*>(user_data);
+            if(strcmp(name, "row") == 0) {
+                state.in_row_tag = true;
+                return;
+            }
+            if(strcmp(name, "c") == 0) {
+                state.in_cell_tag = true;
+                // Default to number
+                state.current_cell_type = CellType::NUMBER;
 
-			    // Extract the "t" attribute value
-			    for (int i = 0; atts[i]; i += 2) {
-				    if ((strcmp(atts[i], "t") == 0)) {
-					    // Extract the cell type from the "t" attribute value
-					    state.current_cell_type = CellTypes::FromString(atts[i + 1]);
-				    }
-			    }
-			    return;
-		    }
-		    if(strcmp(name, "v") == 0) {
-			    state.in_cell_value_tag = true;
-			    return;
-		    }
-	    },
-	    [](void *user_data, const XML_Char *name){
-		    auto &state = *static_cast<StateMachine*>(user_data);
-		    if(strcmp(name, "row") == 0) {
-			    state.in_row_tag = false;
-			    state.read_row_count++;
-			    state.current_row++;
-			    state.current_col = 0;
+                // Extract the "t" attribute value
+                for (int i = 0; atts[i]; i += 2) {
+                    if ((strcmp(atts[i], "t") == 0)) {
+                        // Extract the cell type from the "t" attribute value
+                        state.current_cell_type = CellTypes::FromString(atts[i + 1]);
+                    }
+                }
+                return;
+            }
+            if(strcmp(name, "v") == 0) {
+                state.in_cell_value_tag = true;
+                return;
+            }
+        },
+        [](void *user_data, const XML_Char *name){
+            auto &state = *static_cast<StateMachine*>(user_data);
+            if(strcmp(name, "row") == 0) {
+                state.in_row_tag = false;
+                state.read_row_count++;
+                state.current_row++;
+                state.current_col = 0;
 
-			    if(state.read_row_count >= STANDARD_VECTOR_SIZE) {
-				    // We've read enough rows, suspend the parser
-				    XML_StopParser(state.parser, true);
-			    }
-			    return;
-		    }
-		    if(strcmp(name, "c") == 0) {
-			    state.in_cell_tag = false;
-			    state.current_col++;
-			    return;
-		    }
-		    if(strcmp(name, "v") == 0) {
-			    state.in_cell_value_tag = false;
-			    return;
-		    }
-	    });
+                if(state.read_row_count >= STANDARD_VECTOR_SIZE) {
+                    // We've read enough rows, suspend the parser
+                    XML_StopParser(state.parser, true);
+                }
+                return;
+            }
+            if(strcmp(name, "c") == 0) {
+                state.in_cell_tag = false;
+                state.current_col++;
+                return;
+            }
+            if(strcmp(name, "v") == 0) {
+                state.in_cell_value_tag = false;
+                return;
+            }
+        });
 
-	// Handle character data
-	XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len){
-		auto &state = *static_cast<StateMachine*>(user_data);
-		if(state.in_cell_value_tag) {
-			// Parse the input buffer
-			auto &output_vector = state.payload_chunk.data[state.current_col];
-			auto output_data_ptr = FlatVector::GetData<string_t>(output_vector);
+    // Handle character data
+    XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len){
+        auto &state = *static_cast<StateMachine*>(user_data);
+        if(state.in_cell_value_tag) {
+            // Parse the input buffer
+            auto &output_vector = state.payload_chunk.data[state.current_col];
+            auto output_data_ptr = FlatVector::GetData<string_t>(output_vector);
 
-			if(state.current_cell_type == CellType::SHARED_STRING) {
-				auto shared_string_idx = atoi(string(s, len).c_str());
-				auto shared_string = state.string_table->at(shared_string_idx);
-				output_data_ptr[state.read_row_count] = StringVector::AddString(output_vector, shared_string);
-			} else {
-				// Just use the raw string value for now until we get proper types.
-				// Actually we will do that through casting later.
-				// TODO: Setup a payload chunk with the column types from the binding
-				output_data_ptr[state.read_row_count] = StringVector::AddString(output_vector, string_t(s, len));
-			}
-		}
-	});
+            if(state.current_cell_type == CellType::SHARED_STRING) {
+                auto shared_string_idx = atoi(string(s, len).c_str());
+                auto shared_string = state.string_table->at(shared_string_idx);
+                output_data_ptr[state.read_row_count] = StringVector::AddString(output_vector, shared_string);
+            } else {
+                // Just use the raw string value for now until we get proper types.
+                // Actually we will do that through casting later.
+                // TODO: Setup a payload chunk with the column types from the binding
+                output_data_ptr[state.read_row_count] = StringVector::AddString(output_vector, string_t(s, len));
+            }
+        }
+    });
 }
 
 ~StateMachine() {
-	mz_zip_reader_extract_iter_free(mz_state);
-	XML_ParserFree(parser);
+    mz_zip_reader_extract_iter_free(mz_state);
+    XML_ParserFree(parser);
 }
 
 DataChunk &GetPayloadChunk() {
-	return payload_chunk;
+    return payload_chunk;
 }
 
 idx_t Run() {
-	// We reset the row count here
-	payload_chunk.Reset();
-	read_row_count = 0;
+    // We reset the row count here
+    payload_chunk.Reset();
+    read_row_count = 0;
 
-	while(true) {
-		switch (machine_state) {
-		case State::READING: {
-			auto read_bytes = mz_zip_reader_extract_iter_read(mz_state, buffer, sizeof(buffer));
-			read_byte_size += read_bytes;
-			last_read_size = read_bytes;
-			machine_state = State::PARSING;
-		} break;
-		case State::PARSING: {
-			bool is_final = read_byte_size == total_byte_size;
-			auto status = XML_Parse(parser, const_char_ptr_cast(buffer), last_read_size, is_final);
-			if (status == XML_STATUS_SUSPENDED) {
-				// yield!, we've read all STANDARD_VECTOR_SIZE rows for now.
-				// But stay in the parse state!
-				machine_state = State::PARSING;
-				payload_chunk.SetCardinality(read_row_count);
-				return read_row_count;
-			} else if (status == XML_STATUS_OK) {
-				if (is_final) {
-					// We are done
-					machine_state = State::DONE;
-					payload_chunk.SetCardinality(read_row_count);
-					return read_row_count;
-				} else {
-					// We are not done yet, but we need more data!
-					// Move over to the read state
-					machine_state = State::READING;
-				}
-			} else {
-				throw IOException("Failed to parse XML file");
-			}
-		} break;
-		case State::DONE: {
-			payload_chunk.SetCardinality(read_row_count);
-			return read_row_count;
-		}
-		}
-	}
+    while(true) {
+        switch (machine_state) {
+        case State::READING: {
+            auto read_bytes = mz_zip_reader_extract_iter_read(mz_state, buffer, sizeof(buffer));
+            read_byte_size += read_bytes;
+            last_read_size = read_bytes;
+            machine_state = State::PARSING;
+        } break;
+        case State::PARSING: {
+            bool is_final = read_byte_size == total_byte_size;
+            auto status = XML_Parse(parser, const_char_ptr_cast(buffer), last_read_size, is_final);
+            if (status == XML_STATUS_SUSPENDED) {
+                // yield!, we've read all STANDARD_VECTOR_SIZE rows for now.
+                // But stay in the parse state!
+                machine_state = State::PARSING;
+                payload_chunk.SetCardinality(read_row_count);
+                return read_row_count;
+            } else if (status == XML_STATUS_OK) {
+                if (is_final) {
+                    // We are done
+                    machine_state = State::DONE;
+                    payload_chunk.SetCardinality(read_row_count);
+                    return read_row_count;
+                } else {
+                    // We are not done yet, but we need more data!
+                    // Move over to the read state
+                    machine_state = State::READING;
+                }
+            } else {
+                throw IOException("Failed to parse XML file");
+            }
+        } break;
+        case State::DONE: {
+            payload_chunk.SetCardinality(read_row_count);
+            return read_row_count;
+        }
+        }
+    }
 }
 };
 */
@@ -996,21 +986,20 @@ public:
     }
 
 bool IsSome() const {
-	return is_set;
+    return is_set;
 }
 
 bool IsNone() const {
-	return !is_set;
+    return !is_set;
 }
 
 const T &Get() const {
-	D_ASSERT(is_set);
-	return value;
+    D_ASSERT(is_set);
+    return value;
 }
 };
 
 */
-
 
 /*
 
@@ -1023,114 +1012,114 @@ public:
 
 zip_archive.m_pIO_opaque = file_handle.get();
 zip_archive.m_pRead = [](void *user_data, mz_uint64 file_offset, void* buffer, size_t n) {
-	auto handle = static_cast<FileHandle *>(user_data);
-	handle->Seek(file_offset);
-	auto bytes = handle->Read(buffer, n);
-	return static_cast<size_t>(bytes);
+    auto handle = static_cast<FileHandle *>(user_data);
+    handle->Seek(file_offset);
+    auto bytes = handle->Read(buffer, n);
+    return static_cast<size_t>(bytes);
 };
 
 if(!mz_zip_reader_init(&zip_archive, file_handle->GetFileSize(), MZ_ZIP_FLAG_COMPRESSED_DATA)) {
-	auto error = mz_zip_get_last_error(&zip_archive);
-	auto error_str = mz_zip_get_error_string(error);
-	throw IOException("Failed to initialize zip archive: %s", error_str);
+    auto error = mz_zip_get_last_error(&zip_archive);
+    auto error_str = mz_zip_get_error_string(error);
+    throw IOException("Failed to initialize zip archive: %s", error_str);
 }
 }
 
 int GetSheetFileIndexByName(const string &sheet_name) {
-	auto file_path = "xl/worksheets/" + sheet_name + ".xml";
-	auto file_idx = mz_zip_reader_locate_file(&zip_archive, file_path.c_str(), nullptr, 0);
-	if(file_idx < 0) {
-		auto alternatives = GetAllAvailableSheets();
-		auto candidate_msg = StringUtil::CandidatesErrorMessage(alternatives, sheet_name, "Candidate sheets");
-		throw IOException("Failed to find sheet %s in xlsx file\n%s", sheet_name, candidate_msg);
-	}
-	return file_idx;
+    auto file_path = "xl/worksheets/" + sheet_name + ".xml";
+    auto file_idx = mz_zip_reader_locate_file(&zip_archive, file_path.c_str(), nullptr, 0);
+    if(file_idx < 0) {
+        auto alternatives = GetAllAvailableSheets();
+        auto candidate_msg = StringUtil::CandidatesErrorMessage(alternatives, sheet_name, "Candidate sheets");
+        throw IOException("Failed to find sheet %s in xlsx file\n%s", sheet_name, candidate_msg);
+    }
+    return file_idx;
 }
 
 int GetStringDictionaryFileIndex() {
-	auto file_idx = mz_zip_reader_locate_file(&zip_archive, "xl/sharedStrings.xml", nullptr, 0);
-	if(file_idx < 0) {
-		throw IOException("Failed to find string dictionary in xlsx file (is the file corrupt?)");
-	}
-	return file_idx;
+    auto file_idx = mz_zip_reader_locate_file(&zip_archive, "xl/sharedStrings.xml", nullptr, 0);
+    if(file_idx < 0) {
+        throw IOException("Failed to find string dictionary in xlsx file (is the file corrupt?)");
+    }
+    return file_idx;
 }
 
 std::pair<string, int> GetFirstAvailableSheet() {
-	for(mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
-		mz_zip_archive_file_stat file_stat;
-		mz_zip_reader_file_stat(&zip_archive, i, &file_stat);
-		if (file_stat.m_is_directory) {
-			continue;
-		}
-		auto file_path = string(file_stat.m_filename);
-		if (StringUtil::StartsWith(file_path, "xl/worksheets/") && StringUtil::EndsWith(file_path, ".xml")) {
-			// Found a sheet file
-			auto file_idx = i;
-			auto sheet_name = file_path.substr(14, file_path.size() - 18);
-			return std::make_pair(sheet_name, file_idx);
-		}
-	}
-	throw IOException("Failed to find any sheets in xlsx file (is the file corrupt?)");
+    for(mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
+        mz_zip_archive_file_stat file_stat;
+        mz_zip_reader_file_stat(&zip_archive, i, &file_stat);
+        if (file_stat.m_is_directory) {
+            continue;
+        }
+        auto file_path = string(file_stat.m_filename);
+        if (StringUtil::StartsWith(file_path, "xl/worksheets/") && StringUtil::EndsWith(file_path, ".xml")) {
+            // Found a sheet file
+            auto file_idx = i;
+            auto sheet_name = file_path.substr(14, file_path.size() - 18);
+            return std::make_pair(sheet_name, file_idx);
+        }
+    }
+    throw IOException("Failed to find any sheets in xlsx file (is the file corrupt?)");
 }
 
 vector<string> GetAllAvailableSheets() {
-	vector<string> result;
-	for(mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
-		mz_zip_archive_file_stat file_stat;
-		mz_zip_reader_file_stat(&zip_archive, i, &file_stat);
-		if (file_stat.m_is_directory) {
-			continue;
-		}
-		auto file_path = string(file_stat.m_filename);
-		if (StringUtil::StartsWith(file_path, "xl/worksheets/") && StringUtil::EndsWith(file_path, ".xml")) {
-			// Found a sheet file
-			auto sheet_name = file_path.substr(15, file_path.size() - 19);
-			result.push_back(sheet_name);
-		}
-	}
-	return result;
+    vector<string> result;
+    for(mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip_archive); i++) {
+        mz_zip_archive_file_stat file_stat;
+        mz_zip_reader_file_stat(&zip_archive, i, &file_stat);
+        if (file_stat.m_is_directory) {
+            continue;
+        }
+        auto file_path = string(file_stat.m_filename);
+        if (StringUtil::StartsWith(file_path, "xl/worksheets/") && StringUtil::EndsWith(file_path, ".xml")) {
+            // Found a sheet file
+            auto sheet_name = file_path.substr(15, file_path.size() - 19);
+            result.push_back(sheet_name);
+        }
+    }
+    return result;
 }
 
 struct IterStateDeleter {
-	void operator()(mz_zip_reader_extract_iter_state *state) {
-		mz_zip_reader_extract_iter_free(state);
-	}
+    void operator()(mz_zip_reader_extract_iter_state *state) {
+        mz_zip_reader_extract_iter_free(state);
+    }
 };
 using IterStatePtr = std::unique_ptr<mz_zip_reader_extract_iter_state, IterStateDeleter>;
 
 
 template<class T>
 void ParseSheetWithMachineUntilCompletion(int sheet_idx, XMLStateMachine<T> &machine) {
-	mz_zip_archive_file_stat file_stat;
-	auto ok = mz_zip_reader_file_stat(&zip_archive, sheet_idx, &file_stat);
-	if(!ok) {
-		throw IOException("Failed to read file stat for sheet %d", sheet_idx);
-	}
+    mz_zip_archive_file_stat file_stat;
+    auto ok = mz_zip_reader_file_stat(&zip_archive, sheet_idx, &file_stat);
+    if(!ok) {
+        throw IOException("Failed to read file stat for sheet %d", sheet_idx);
+    }
 
-	auto iter = IterStatePtr(mz_zip_reader_extract_iter_new(&zip_archive, sheet_idx, 0));
-	if(!iter) {
-		throw IOException("Failed to initialize extraction iterator for sheet %d", sheet_idx);
-	}
+    auto iter = IterStatePtr(mz_zip_reader_extract_iter_new(&zip_archive, sheet_idx, 0));
+    if(!iter) {
+        throw IOException("Failed to initialize extraction iterator for sheet %d", sheet_idx);
+    }
 
-	mz_uint64 bytes_total = file_stat.m_uncomp_size;
-	mz_uint64 bytes_read = 0;
+    mz_uint64 bytes_total = file_stat.m_uncomp_size;
+    mz_uint64 bytes_read = 0;
 
-	char buffer[2048];
-	while(bytes_read != bytes_total) {
-		auto read_size = mz_zip_reader_extract_iter_read(iter.get(), buffer, sizeof(buffer));
-		bytes_read += read_size;
-		auto status = machine.Parse(buffer, read_size, bytes_read == bytes_total);
-		while(status == XMLParseResult::SUSPENDED) {
-			status = machine.Resume();
-		}
-		if(status == XMLParseResult::ABORTED) {
-			return;
-		}
-	}
+    char buffer[2048];
+    while(bytes_read != bytes_total) {
+        auto read_size = mz_zip_reader_extract_iter_read(iter.get(), buffer, sizeof(buffer));
+        bytes_read += read_size;
+        auto status = machine.Parse(buffer, read_size, bytes_read == bytes_total);
+        while(status == XMLParseResult::SUSPENDED) {
+            status = machine.Resume();
+        }
+        if(status == XMLParseResult::ABORTED) {
+            return;
+        }
+    }
 }
 
 ~XLSXFileHandle() {
-	mz_zip_reader_end(&zip_archive);
+    mz_zip_reader_end(&zip_archive);
 }
 };
  */

@@ -55,4 +55,4 @@ struct CellRange {
 	uint32_t GetHeight();
 };
 
-}
+} // namespace duckdb

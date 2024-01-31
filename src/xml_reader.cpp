@@ -16,26 +16,25 @@ namespace duckdb {
 // Sniff
 //------------------------------------------------------------------------------
 
-
 enum class XMLTableLayout {
 	ROWS,
 	/*
-	 	<row column1="value1" column2="value2" .../>
+	    <row column1="value1" column2="value2" .../>
 	 */
 	COLUMNS,
 	/*
-		<row>
-			<column1>value1</column1>
-			<column2>value2</column2>
-		</row>
+	    <row>
+	        <column1>value1</column1>
+	        <column2>value2</column2>
+	    </row>
 	 */
 
 	FIELDS,
 	/*
-		<row>
-			<field name='column1'>value1</field>
-			<field name='column2'>value2</field>
-		</row>
+	    <row>
+	        <field name='column1'>value1</field>
+	        <field name='column2'>value2</field>
+	    </row>
 	 */
 };
 
@@ -49,7 +48,7 @@ static XMLSniffResult SniffXLSX(FileHandle &handle, const string &row_tag) {
 	auto parser = XML_ParserCreate(nullptr);
 
 	struct SniffState {
-		const char* row_tag = nullptr;
+		const char *row_tag = nullptr;
 		bool in_row_tag = false;
 		XML_Parser parser;
 
@@ -66,53 +65,56 @@ static XMLSniffResult SniffXLSX(FileHandle &handle, const string &row_tag) {
 
 	XML_SetUserData(parser, &state);
 
-	XML_SetElementHandler(parser, [](void *user_data, const XML_Char *name, const XML_Char **atts) {
-		auto &state = *reinterpret_cast<SniffState *>(user_data);
-		if(!state.in_row_tag && strcmp(name, state.row_tag) == 0) {
-			// Opening row tag
-			state.in_row_tag = true;
+	XML_SetElementHandler(
+	    parser,
+	    [](void *user_data, const XML_Char *name, const XML_Char **atts) {
+		    auto &state = *reinterpret_cast<SniffState *>(user_data);
+		    if (!state.in_row_tag && strcmp(name, state.row_tag) == 0) {
+			    // Opening row tag
+			    state.in_row_tag = true;
 
-			// Read attributes
-			state.row_attributes.clear();
-			for(size_t i = 0; atts[i]; i += 2) {
-				state.row_attributes[atts[i]] = atts[i + 1];
-			}
-			return;
-		}
-		if(state.in_row_tag && !state.in_column_tag) {
-			// Opening a column tag
-			state.in_column_tag = true;
-			state.column_tags.push_back(name);
-			state.column_text.emplace_back();
-			state.column_attributes.emplace_back();
+			    // Read attributes
+			    state.row_attributes.clear();
+			    for (size_t i = 0; atts[i]; i += 2) {
+				    state.row_attributes[atts[i]] = atts[i + 1];
+			    }
+			    return;
+		    }
+		    if (state.in_row_tag && !state.in_column_tag) {
+			    // Opening a column tag
+			    state.in_column_tag = true;
+			    state.column_tags.push_back(name);
+			    state.column_text.emplace_back();
+			    state.column_attributes.emplace_back();
 
-			// Read attributes
-			auto &column_attributes = state.column_attributes.back();
-			for(size_t i = 0; atts[i]; i += 2) {
-				column_attributes[atts[i]] = atts[i + 1];
-			}
-			return;
-		}
-	}, [](void *user_data, const XML_Char *name) {
-		auto &state = *reinterpret_cast<SniffState *>(user_data);
-		if(state.in_row_tag && strcmp(name, state.row_tag) == 0) {
-			// Closing row tag
-			state.in_row_tag = false;
+			    // Read attributes
+			    auto &column_attributes = state.column_attributes.back();
+			    for (size_t i = 0; atts[i]; i += 2) {
+				    column_attributes[atts[i]] = atts[i + 1];
+			    }
+			    return;
+		    }
+	    },
+	    [](void *user_data, const XML_Char *name) {
+		    auto &state = *reinterpret_cast<SniffState *>(user_data);
+		    if (state.in_row_tag && strcmp(name, state.row_tag) == 0) {
+			    // Closing row tag
+			    state.in_row_tag = false;
 
-			// We read a row, now we're done, abort the parse.
-			XML_StopParser(state.parser, false);
-			return;
-		}
-		if(state.in_column_tag && state.column_tags.back() == name) {
-			// Closing a column tag
-			state.in_column_tag = false;
-			return;
-		}
-	});
+			    // We read a row, now we're done, abort the parse.
+			    XML_StopParser(state.parser, false);
+			    return;
+		    }
+		    if (state.in_column_tag && state.column_tags.back() == name) {
+			    // Closing a column tag
+			    state.in_column_tag = false;
+			    return;
+		    }
+	    });
 
 	XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len) {
 		auto &state = *reinterpret_cast<SniffState *>(user_data);
-		if(state.in_column_tag) {
+		if (state.in_column_tag) {
 			// We are in a column tag, append the text
 			state.column_text.back().append(s, len);
 		}
@@ -122,13 +124,13 @@ static XMLSniffResult SniffXLSX(FileHandle &handle, const string &row_tag) {
 	auto total_bytes_available = handle.GetFileSize();
 	auto total_bytes_read = 0;
 
-	while(total_bytes_read != total_bytes_available) {
+	while (total_bytes_read != total_bytes_available) {
 		auto bytes_read = handle.Read(buffer, sizeof(buffer));
 		total_bytes_read += bytes_read;
 		auto status = XML_Parse(parser, buffer, bytes_read, total_bytes_read == total_bytes_available);
-		if(status == XML_STATUS_ERROR) {
+		if (status == XML_STATUS_ERROR) {
 			auto error_code = XML_GetErrorCode(parser);
-			if(error_code == XML_ERROR_ABORTED) {
+			if (error_code == XML_ERROR_ABORTED) {
 				// aborted, we are done
 				break;
 			} else {
@@ -146,10 +148,10 @@ static XMLSniffResult SniffXLSX(FileHandle &handle, const string &row_tag) {
 	XMLSniffResult result;
 
 	// Do we even have any column tags within the row tag?
-	if(state.column_tags.empty()) {
+	if (state.column_tags.empty()) {
 		// No: then assume the attributes of the row tag are the columns
 		result.table_layout = XMLTableLayout::ROWS;
-		for(auto &kv : state.row_attributes) {
+		for (auto &kv : state.row_attributes) {
 			result.column_names.push_back(kv.first);
 			result.column_types.push_back(LogicalType::VARCHAR);
 		}
@@ -158,13 +160,13 @@ static XMLSniffResult SniffXLSX(FileHandle &handle, const string &row_tag) {
 
 	// Are all column tags the same?
 	bool all_column_tags_same = true;
-	for(size_t i = 1; i < state.column_tags.size(); i++) {
-		if(state.column_tags[i] != state.column_tags[0]) {
+	for (size_t i = 1; i < state.column_tags.size(); i++) {
+		if (state.column_tags[i] != state.column_tags[0]) {
 			// nope, not all column tags are the same
 			all_column_tags_same = false;
 		}
 	}
-	if(all_column_tags_same) {
+	if (all_column_tags_same) {
 		// Yes: then check that they all have a "name" attribute
 		bool all_has_name_attribute = true;
 		for (size_t i = 0; i < state.column_tags.size(); i++) {
@@ -189,13 +191,12 @@ static XMLSniffResult SniffXLSX(FileHandle &handle, const string &row_tag) {
 
 	// Else, assume the tag is the column, and the text is the value
 	result.table_layout = XMLTableLayout::COLUMNS;
-	for(size_t i = 0; i < state.column_tags.size(); i++) {
+	for (size_t i = 0; i < state.column_tags.size(); i++) {
 		result.column_names.push_back(state.column_tags[i]);
 		result.column_types.push_back(LogicalType::VARCHAR);
 	}
 	return result;
 }
-
 
 //------------------------------------------------------------------------------
 // Bind
@@ -241,43 +242,38 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	return std::move(result);
 }
 
-
-
 //------------------------------------------------------------------------------
 // Different table layout parsers
 //------------------------------------------------------------------------------
-class FileTableParser : public XMLStateMachine<FileTableParser> {
-
-};
-
+class FileTableParser : public XMLStateMachine<FileTableParser> {};
 
 class ColumnsAsRowAttributesParser : public XMLStateMachine<ColumnsAsRowAttributesParser> {
 	string row_tag;
 	bool in_row_tag = false;
 	DataChunk payload_chunk;
 	idx_t written_rows = 0;
-public:
 
+public:
 	explicit ColumnsAsRowAttributesParser(ClientContext &ctx, idx_t column_count_p, const string &row_tag_p)
 	    : row_tag(row_tag_p) {
 		payload_chunk.Initialize(ctx, vector<LogicalType>(column_count_p, LogicalType::VARCHAR));
 	}
 
 	void OnStartElement(const char *name, const char **atts) {
-		if(!in_row_tag && strcmp(name, row_tag.c_str()) == 0) {
+		if (!in_row_tag && strcmp(name, row_tag.c_str()) == 0) {
 			// Opening row tag
 			in_row_tag = true;
 
 			// Read attributes
 			auto column_count = payload_chunk.ColumnCount();
 			auto attribute_count = 0;
-			for(size_t i = 0; atts[i]; i += 2) {
+			for (size_t i = 0; atts[i]; i += 2) {
 				attribute_count++;
 			}
 
-			for(idx_t column_idx = 0; column_idx < column_count; column_idx++) {
+			for (idx_t column_idx = 0; column_idx < column_count; column_idx++) {
 				auto &payload_column = payload_chunk.data[column_idx];
-				if(column_idx >= attribute_count) {
+				if (column_idx >= attribute_count) {
 					FlatVector::SetNull(payload_column, written_rows, true);
 				} else {
 					auto &value = atts[column_idx * 2 + 1];
@@ -289,12 +285,12 @@ public:
 	}
 
 	void OnEndElement(const char *name) {
-		if(in_row_tag && strcmp(name, row_tag.c_str()) == 0) {
+		if (in_row_tag && strcmp(name, row_tag.c_str()) == 0) {
 			// Closing row tag
 			in_row_tag = false;
 			written_rows++;
 
-			if(written_rows == STANDARD_VECTOR_SIZE) {
+			if (written_rows == STANDARD_VECTOR_SIZE) {
 				// Chunk is full, suspend the parser
 				Suspend();
 			}
@@ -302,7 +298,6 @@ public:
 	}
 
 	void OnCharacterData(const char *s, int len) {
-
 	}
 };
 
@@ -318,7 +313,7 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 	auto &bind_info = input.bind_data->Cast<XMLBindInfo>();
 	auto result = make_uniq<XMLReaderGlobalState>();
 
-	switch(bind_info.table_layout) {
+	switch (bind_info.table_layout) {
 	case XMLTableLayout::ROWS:
 		result->parser = make_uniq<ColumnsAsRowAttributesParser>(context, bind_info.column_count, bind_info.row_tag);
 		break;
@@ -331,7 +326,6 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 	return std::move(result);
 }
 
-
 //------------------------------------------------------------------------------
 // Execute
 //------------------------------------------------------------------------------
@@ -340,12 +334,9 @@ static void Execute(ClientContext &context, TableFunctionInput &data_p, DataChun
 	auto &global_state = data_p.global_state->Cast<XMLReaderGlobalState>();
 
 	// TODO:
-	if(!global_state.parser) {
+	if (!global_state.parser) {
 		output.SetCardinality(0);
 	}
-
-
-
 }
 
 //------------------------------------------------------------------------------
@@ -377,5 +368,4 @@ void XMLReader::Register(DatabaseInstance &db) {
 	db.config.replacement_scans.emplace_back(ReplacementScan);
 }
 
-
-}
+} // namespace duckdb

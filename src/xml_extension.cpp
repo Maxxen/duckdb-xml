@@ -14,18 +14,17 @@
 namespace duckdb {
 
 inline void XmlScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &name_vector = args.data[0];
-    UnaryExecutor::Execute<string_t, string_t>(
-	    name_vector, result, args.size(),
-	    [&](string_t name) {
-			return StringVector::AddString(result, "Xml "+name.GetString()+" 🐥");;
-        });
+	auto &name_vector = args.data[0];
+	UnaryExecutor::Execute<string_t, string_t>(name_vector, result, args.size(), [&](string_t name) {
+		return StringVector::AddString(result, "Xml " + name.GetString() + " 🐥");
+		;
+	});
 }
 
 static void LoadInternal(DatabaseInstance &instance) {
-    // Register a scalar function
-    auto xml_scalar_function = ScalarFunction("xml", {LogicalType::VARCHAR}, LogicalType::VARCHAR, XmlScalarFun);
-    ExtensionUtil::RegisterFunction(instance, xml_scalar_function);
+	// Register a scalar function
+	auto xml_scalar_function = ScalarFunction("xml", {LogicalType::VARCHAR}, LogicalType::VARCHAR, XmlScalarFun);
+	ExtensionUtil::RegisterFunction(instance, xml_scalar_function);
 
 	XLSXReader::Register(instance);
 	XMLReader::Register(instance);

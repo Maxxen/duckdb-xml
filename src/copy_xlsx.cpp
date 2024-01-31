@@ -12,14 +12,12 @@ using namespace duckdb_miniz;
 //-------------------------------------------------------------------------
 // Bind
 //-------------------------------------------------------------------------
-struct CopyXLSXBindData : public FunctionData {
+struct CopyXLSXBindData : public FunctionData {};
 
-};
-
-static unique_ptr<FunctionData> Bind(ClientContext &context, const CopyInfo &info, const vector<string> &names, const vector<LogicalType> &sql_types) {
+static unique_ptr<FunctionData> Bind(ClientContext &context, const CopyInfo &info, const vector<string> &names,
+                                     const vector<LogicalType> &sql_types) {
 	return nullptr;
 }
-
 
 //-------------------------------------------------------------------------
 // Global Data & Init
@@ -29,7 +27,8 @@ struct CopyXLSXGlobalData : public GlobalFunctionData {
 	mz_zip_archive zip_archive;
 };
 
-static unique_ptr<GlobalFunctionData> InitGlobal(ClientContext &context, FunctionData &bind_data, const string &file_path) {
+static unique_ptr<GlobalFunctionData> InitGlobal(ClientContext &context, FunctionData &bind_data,
+                                                 const string &file_path) {
 	auto result = make_uniq<CopyXLSXGlobalData>();
 
 	/*
@@ -45,23 +44,20 @@ static unique_ptr<GlobalFunctionData> InitGlobal(ClientContext &context, Functio
 // Sink
 //-------------------------------------------------------------------------
 static void Sink(ExecutionContext &context, FunctionData &bdata, GlobalFunctionData &gstate, LocalFunctionData &lstate,
-                     DataChunk &input) {
-
+                 DataChunk &input) {
 }
 
 //-------------------------------------------------------------------------
 // Combine
 //-------------------------------------------------------------------------
 static void Combine(ExecutionContext &context, FunctionData &bind_data, GlobalFunctionData &gstate,
-                        LocalFunctionData &lstate) {
-
+                    LocalFunctionData &lstate) {
 }
 
 //-------------------------------------------------------------------------
 // Finalize
 //-------------------------------------------------------------------------
 static void Finalize(ClientContext &context, FunctionData &bind_data, GlobalFunctionData &gstate) {
-
 }
 
 //-------------------------------------------------------------------------
@@ -81,7 +77,6 @@ void XLSXReader::RegisterCopy(DatabaseInstance &db) {
 	info.copy_to_finalize = Finalize;
 	info.supports_type = SupportsType;
 	info.extension = "xlsx";
-
 }
 
-}
+} // namespace duckdb
