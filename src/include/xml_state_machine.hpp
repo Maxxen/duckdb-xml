@@ -33,11 +33,6 @@ public:
 			    auto this_parser = static_cast<IMPL*>(user_data);
 			    this_parser->OnEndElement(name);
 		    });
-
-		XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len) {
-			auto this_parser = static_cast<IMPL *>(user_data);
-			this_parser->OnCharacterData(s, len);
-		});
 	}
 
 	// Feed data into the parser
@@ -114,6 +109,17 @@ protected:
 	void Stop() {
 		XML_StopParser(parser, false);
 	}
+
+    void EnableTextParsing(bool enable) {
+        if(enable) {
+            XML_SetCharacterDataHandler(parser, [](void *user_data, const XML_Char *s, int len) {
+                auto this_parser = static_cast<IMPL*>(user_data);
+                this_parser->OnCharacterData(s, len);
+            });
+        } else {
+            XML_SetCharacterDataHandler(parser, nullptr);
+        }
+    }
 
 	void Suspend() {
 		XML_StopParser(parser, true);

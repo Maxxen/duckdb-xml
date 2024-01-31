@@ -12,12 +12,31 @@ SELECT * FROM read_xlsx('test/sql/xlsx/data/two_sheets.xlsx', header = false)
 A	B
 42.0	1337.0
 
-# FIXME: currently broken
-# But we can specify another sheet too
-#query II
-#SELECT * FROM read_xlsx('test/sql/xlsx/data/two_sheets.xlsx', sheet = 'My Sheet')
-#----
-#foo	bar
+
+query II
+SELECT X, Y FROM read_xlsx('test/sql/xlsx/data/two_sheets.xlsx', sheet = 'My Sheet', header = true)
+----
+foo	bar
+
+query III
+SELECT * FROM read_xlsx('test/sql/xlsx/data/two_sheets.xlsx', sheet = 'My Sheet', skip=0)
+----
+NULL	NULL	NULL
+NULL	NULL	NULL
+NULL	X	Y
+NULL	foo	bar
+
+query III
+SELECT * FROM read_xlsx('test/sql/xlsx/data/two_sheets.xlsx', sheet = 'My Sheet', skip=0, header = true)
+----
+NULL	NULL	NULL
+NULL	X	Y
+NULL	foo	bar
+
+query II
+SELECT X, Y FROM read_xlsx('test/sql/xlsx/data/two_sheets.xlsx', sheet = 'My Sheet', skip=2, header = true)
+----
+foo	bar
 
 # Sheet not found? Provide suggestions
 statement error

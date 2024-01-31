@@ -21,7 +21,6 @@ a	b	c	d
 NULL	b	NULL	NULL
 
 
-# FIXME: Broken
 query IIII
 SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells.xlsx', skip=2);
 ----
@@ -62,32 +61,32 @@ a	b	c	NULL
 a	1x2	c	NULL
 NULL	NULL	NULL	NULL
 
-query III
+# We dont adjust the width for skipped collapsed cells for now
+query IIII
 SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=3, header=false);
 ----
-a	b	c
-a	b	c
-a	1x2	c
-NULL	NULL	NULL
+a	b	c	NULL
+a	b	c	NULL
+a	1x2	c	NULL
+NULL	NULL	NULL	NULL
 
 
-query III
+query IIII
 SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=4, header=false);
 ----
-a	b	c
-a	1x2	c
-NULL	NULL	NULL
+a	b	c	NULL
+a	1x2	c	NULL
+NULL	NULL	NULL	NULL
 
-query III
+query IIII
 SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=5, header=false);
 ----
-a	1x2	c
-NULL	NULL	NULL
+a	1x2	c	NULL
+NULL	NULL	NULL	NULL
 
 
 # FIXME: This is kind of a wonky edge case. Although we dont really want to support collapsed cells properly.
-query I
+query IIII
 SELECT * FROM read_xlsx('test/sql/xlsx/data/collapsed_cells_jagged.xlsx', skip=6, header=false);
 ----
-NULL
-
+NULL	NULL	NULL	NULL
