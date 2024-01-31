@@ -686,17 +686,20 @@ private:
 	string current_cell_data;
 	vector<bool> current_validity;
 
+	// Reverse projection map, mapping column index to output index (or -1 if not in output)
+	vector<idx_t> projection_map;
+
 public:
 	idx_t current_output_row = 0;
 	DataChunk payload_chunk;
 
 	explicit XLSXSheetReader(ClientContext &ctx, const vector<string> &string_table_p, idx_t start_row_p,
-	                         idx_t col_count_p)
-	    : string_table(string_table_p), start_row(start_row_p), col_count(col_count_p),
-	      current_validity(col_count_p, false) {
+	                         const vector<idx_t> &projection_map_p, idx_t output_column_count)
+	    : string_table(string_table_p), start_row(start_row_p), col_count(projection_map_p.size()),
+	      current_validity(projection_map_p.size(), false), projection_map(projection_map_p) {
 
 		// Setup a payload chunk with only the columns we care about
-		payload_chunk.Initialize(ctx, vector<LogicalType>(col_count, LogicalType::VARCHAR));
+		payload_chunk.Initialize(ctx, vector<LogicalType>(output_column_count, LogicalType::VARCHAR));
 	}
 
 	void OnStartElement(const char *name, const char **atts) {
@@ -740,8 +743,8 @@ public:
 			if (in_row_range) {
 				// Pad any missing columns with NULLs
 				for (idx_t i = 0; i < col_count; i++) {
-					if (!current_validity[i]) {
-						FlatVector::SetNull(payload_chunk.data[i], current_output_row, true);
+					if (!current_validity[i] && projection_map[i] != -1) {
+						FlatVector::SetNull(payload_chunk.data[projection_map[i]], current_output_row, true);
 					} else {
 						// Reset the nullmask
 						current_validity[i] = false;
@@ -760,11 +763,11 @@ public:
 		if (in_row_range && in_col && matches(name, "c")) {
 			in_col = false;
 
-			if (in_col_range && !current_cell_data.empty()) {
+			if (in_col_range && !current_cell_data.empty() && projection_map[current_col] != -1) {
 				current_validity[current_col] = true;
 
 				// Set the value in the payload chunk
-				auto &payload_vec = payload_chunk.data[current_col];
+				auto &payload_vec = payload_chunk.data[projection_map[current_col]];
 
 				string_t blob;
 				if (current_cell_type == CellType::SHARED_STRING) {
@@ -805,8 +808,6 @@ struct XLSXReaderGlobalState : public GlobalTableFunctionState {
 
 	// Projected column ids
 	vector<idx_t> column_ids;
-	// Reverse projection, maps from column id to projected column id
-	vector<idx_t> reverse_projection;
 
 	// The number of empty rows to pad in the beginning
 	idx_t initial_empty_rows = 0;
@@ -817,10 +818,6 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 	auto result = make_uniq<XLSXReaderGlobalState>();
 
 	result->column_ids = input.column_ids;
-	result->reverse_projection.resize(bind_info.col_count, -1);
-	for (idx_t i = 0; i < input.column_ids.size(); i++) {
-		result->reverse_projection[input.column_ids[i]] = i;
-	}
 
 	auto &fs = FileSystem::GetFileSystem(context);
 	result->archive = ZipArchiveFileHandle::Open(fs, bind_info.file_name);
@@ -831,15 +828,20 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 	XLSXDenseStringTableParser string_dict_parser(*result->string_table);
 	string_dict_parser.ParseUntilEnd(string_dict_stream);
 
-	// Setup the scanner
+    // Setup the projection map
+	vector<idx_t> projection_map(bind_info.col_count, -1);
+	for (idx_t i = 0; i < input.column_ids.size(); i++) {
+		projection_map[input.column_ids[i]] = i;
+	}
+
+    // Setup the scanner
 	result->sheet_reader =
-	    make_uniq<XLSXSheetReader>(context, *result->string_table, bind_info.start_row, bind_info.col_count);
+	    make_uniq<XLSXSheetReader>(context, *result->string_table, bind_info.start_row, projection_map, input.column_ids.size());
 
 	result->status = XMLParseResult::OK;
 
 	// Setup the stream
 	result->sheet_stream = result->archive->Extract(bind_info.sheet_file_idx);
-
 	result->initial_empty_rows = bind_info.initial_empty_rows;
 
 	return std::move(result);
@@ -891,7 +893,7 @@ static void Execute(ClientContext &context, TableFunctionInput &data_p, DataChun
 	output.SetCardinality(reader.current_output_row);
 	if (reader.current_output_row != 0) {
 		for (idx_t i = 0; i < output.ColumnCount(); i++) {
-			VectorOperations::DefaultCast(reader.payload_chunk.data[state.column_ids[i]], output.data[i],
+			VectorOperations::DefaultCast(reader.payload_chunk.data[i], output.data[i],
 			                              reader.current_output_row);
 		}
 	}
