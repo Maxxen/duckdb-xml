@@ -15,10 +15,14 @@ set(EXTENSION_SOURCES src/xml_extension.cpp src/xlsx_reader.cpp
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
+find_package(ZLIB REQUIRED)
 find_package(EXPAT CONFIG REQUIRED)
+find_package(minizip-ng CONFIG REQUIRED)
 
-target_link_libraries(${EXTENSION_NAME} expat::expat)
-target_link_libraries(${LOADABLE_EXTENSION_NAME} expat::expat)
+target_link_libraries(${EXTENSION_NAME} expat::expat MINIZIP::minizip-ng
+                      ZLIB::ZLIB)
+target_link_libraries(${LOADABLE_EXTENSION_NAME} expat::expat
+                      MINIZIP::minizip-ng ZLIB::ZLIB)
 
 install(
   TARGETS ${EXTENSION_NAME}

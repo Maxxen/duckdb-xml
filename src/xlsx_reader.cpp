@@ -824,11 +824,13 @@ public:
 };
 
 struct XLSXReaderGlobalState : public GlobalTableFunctionState {
+	static constexpr idx_t BUFFER_SIZE = 2048;
+
 	shared_ptr<ZipArchiveFileHandle> archive;
 	unique_ptr<DenseStringTable> string_table;
 	unique_ptr<ZipArchiveExtractStream> sheet_stream;
 	unique_ptr<XLSXSheetReader> sheet_reader;
-	char buffer[4096];
+	char buffer[BUFFER_SIZE];
 	XMLParseResult status;
 
 	// Projected column ids

@@ -28,6 +28,13 @@ ZipArchiveFileHandle::ZipArchiveFileHandle(unique_ptr<FileHandle> file_handle_p)
 		return static_cast<size_t>(bytes);
 	};
 
+	zip_archive.m_pWrite = [](void *user_data, mz_uint64 file_offset, const void *buffer, size_t n) {
+		auto handle = static_cast<FileHandle *>(user_data);
+		handle->Seek(file_offset);
+		auto bytes = handle->Write(const_cast<void *>(buffer), n);
+		return static_cast<size_t>(bytes);
+	};
+
 	// Initialize archive
 	if (!mz_zip_reader_init(&zip_archive, file_handle_p->GetFileSize(), MZ_ZIP_FLAG_COMPRESSED_DATA)) {
 		auto error = mz_zip_get_last_error(&zip_archive);

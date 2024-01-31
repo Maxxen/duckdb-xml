@@ -28,6 +28,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 	XLSXReader::Register(instance);
 	XMLReader::Register(instance);
+	XLSXReader::RegisterCopy(instance);
 }
 
 void XmlExtension::Load(DuckDB &db) {
