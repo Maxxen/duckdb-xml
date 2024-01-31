@@ -616,14 +616,41 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 // Init Global
 //------------------------------------------------------------------------------
 
+class DenseStringTable {
+	vector<string_t> strings;
+
+public:
+	explicit DenseStringTable(Allocator &allocator_p) : allocator(allocator_p) {
+	}
+
+	ArenaAllocator allocator;
+
+	void AddString(const char *str, idx_t len) {
+		auto ptr = allocator.Allocate(len);
+		memcpy(ptr, str, len);
+		strings.emplace_back(const_char_ptr_cast(ptr), static_cast<uint32_t>(len));
+	}
+
+	const string_t &GetString(idx_t idx) const {
+		if (idx > strings.size()) {
+			throw IOException("Failed to find shared string with index %d", idx);
+		}
+		return strings[idx];
+	}
+
+	void Reserve(idx_t count) {
+		strings.reserve(count);
+	}
+};
+
 class XLSXDenseStringTableParser : public XMLStateMachine<XLSXDenseStringTableParser> {
 	bool in_t_tag = false;
 	idx_t current_string_idx = 0;
-	string current_string;
-	vector<string> &string_table;
+	vector<char> current_string;
+	DenseStringTable &string_table;
 
 public:
-	explicit XLSXDenseStringTableParser(vector<string> &string_table_p) : string_table(string_table_p) {
+	explicit XLSXDenseStringTableParser(DenseStringTable &string_table_p) : string_table(string_table_p) {
 	}
 
 	void OnStartElement(const char *name, const char **atts) {
@@ -641,7 +668,7 @@ public:
 				if ((strcmp(atts[i], "uniqueCount") == 0)) {
 					// Reserve space for the strings
 					auto count = atoi(atts[i + 1]);
-					string_table.reserve(count);
+					string_table.Reserve(count);
 					return;
 				}
 			}
@@ -653,7 +680,7 @@ public:
 		if (strcmp(name, "t") == 0) {
 			in_t_tag = false;
 			EnableTextParsing(false);
-			string_table.push_back(current_string);
+			string_table.AddString(current_string.data(), current_string.size());
 			current_string.clear();
 			current_string_idx++;
 			return;
@@ -662,7 +689,7 @@ public:
 
 	void OnCharacterData(const char *s, int len) {
 		if (in_t_tag) {
-			current_string.append(s, len);
+			current_string.insert(current_string.end(), s, s + len);
 		}
 	}
 };
@@ -675,7 +702,7 @@ private:
 	bool in_row_range = false;
 	bool in_val = false;
 
-	const vector<string> &string_table;
+	const DenseStringTable &string_table;
 
 	idx_t start_row = 0;
 	idx_t current_row = 0;
@@ -693,7 +720,7 @@ public:
 	idx_t current_output_row = 0;
 	DataChunk payload_chunk;
 
-	explicit XLSXSheetReader(ClientContext &ctx, const vector<string> &string_table_p, idx_t start_row_p,
+	explicit XLSXSheetReader(ClientContext &ctx, const DenseStringTable &string_table_p, idx_t start_row_p,
 	                         const vector<idx_t> &projection_map_p, idx_t output_column_count)
 	    : string_table(string_table_p), start_row(start_row_p), col_count(projection_map_p.size()),
 	      current_validity(projection_map_p.size(), false), projection_map(projection_map_p) {
@@ -772,11 +799,9 @@ public:
 				string_t blob;
 				if (current_cell_type == CellType::SHARED_STRING) {
 					auto idx = std::stoi(current_cell_data);
-					if (idx >= string_table.size()) {
-						throw IOException("Failed to find shared string with index %d", idx);
-					}
-					auto entry = string_table[idx];
-					blob = StringVector::AddStringOrBlob(payload_vec, entry);
+					// Since the string table is part of the global state, it will stay alive until the end of the
+					// pipeline. We can just reference the string directly then without having to copy it to the vector
+					blob = string_table.GetString(idx);
 				} else {
 					blob = StringVector::AddStringOrBlob(payload_vec, current_cell_data);
 				}
@@ -800,10 +825,10 @@ public:
 
 struct XLSXReaderGlobalState : public GlobalTableFunctionState {
 	shared_ptr<ZipArchiveFileHandle> archive;
-	unique_ptr<vector<string>> string_table;
+	unique_ptr<DenseStringTable> string_table;
 	unique_ptr<ZipArchiveExtractStream> sheet_stream;
 	unique_ptr<XLSXSheetReader> sheet_reader;
-	char buffer[2048];
+	char buffer[4096];
 	XMLParseResult status;
 
 	// Projected column ids
@@ -811,11 +836,15 @@ struct XLSXReaderGlobalState : public GlobalTableFunctionState {
 
 	// The number of empty rows to pad in the beginning
 	idx_t initial_empty_rows = 0;
+
+	explicit XLSXReaderGlobalState(ClientContext &context)
+	    : string_table(make_uniq<DenseStringTable>(BufferAllocator::Get(context))) {
+	}
 };
 
 static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, TableFunctionInitInput &input) {
 	auto &bind_info = input.bind_data->Cast<XLSXBindInfo>();
-	auto result = make_uniq<XLSXReaderGlobalState>();
+	auto result = make_uniq<XLSXReaderGlobalState>(context);
 
 	result->column_ids = input.column_ids;
 
@@ -823,20 +852,19 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 	result->archive = ZipArchiveFileHandle::Open(fs, bind_info.file_name);
 
 	// Parse the string dictionary
-	result->string_table = make_uniq<vector<string>>();
 	auto string_dict_stream = result->archive->Extract(bind_info.string_dict_idx);
 	XLSXDenseStringTableParser string_dict_parser(*result->string_table);
 	string_dict_parser.ParseUntilEnd(string_dict_stream);
 
-    // Setup the projection map
+	// Setup the projection map
 	vector<idx_t> projection_map(bind_info.col_count, -1);
 	for (idx_t i = 0; i < input.column_ids.size(); i++) {
 		projection_map[input.column_ids[i]] = i;
 	}
 
-    // Setup the scanner
-	result->sheet_reader =
-	    make_uniq<XLSXSheetReader>(context, *result->string_table, bind_info.start_row, projection_map, input.column_ids.size());
+	// Setup the scanner
+	result->sheet_reader = make_uniq<XLSXSheetReader>(context, *result->string_table, bind_info.start_row,
+	                                                  projection_map, input.column_ids.size());
 
 	result->status = XMLParseResult::OK;
 
@@ -893,8 +921,7 @@ static void Execute(ClientContext &context, TableFunctionInput &data_p, DataChun
 	output.SetCardinality(reader.current_output_row);
 	if (reader.current_output_row != 0) {
 		for (idx_t i = 0; i < output.ColumnCount(); i++) {
-			VectorOperations::DefaultCast(reader.payload_chunk.data[i], output.data[i],
-			                              reader.current_output_row);
+			VectorOperations::DefaultCast(reader.payload_chunk.data[i], output.data[i], reader.current_output_row);
 		}
 	}
 }
