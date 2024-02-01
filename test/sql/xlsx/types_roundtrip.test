@@ -1,0 +1,14 @@
+require xml
+
+#statement ok
+#CREATE TABLE t1 AS SELECT bool, int, double, date, varchar FROM test_all_types();
+
+#statement ok
+#COPY (FROM t1) TO '__TEST_DIR__/test_all_types.xlsx' (FORMAT 'xlsx', HEADER true);
+
+#statement ok
+#CREATE TABLE t2 AS SELECT * FROM '__TEST_DIR__/test_all_types.xlsx'
+
+
+#statement ok
+#CREATE TABLE t1 (s VARCHAR, i INT, d DOUBLE, b BOOLEAN, dt DATE);

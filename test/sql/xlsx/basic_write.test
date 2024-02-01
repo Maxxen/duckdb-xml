@@ -1,0 +1,29 @@
+require xml
+
+statement ok
+CREATE TABLE t1 (i INT, S VARCHAR);
+
+statement ok
+INSERT INTO t1 VALUES (2, 'foobar'), (1, 'barbar');
+
+statement ok
+COPY (FROM t1) TO '__TEST_DIR__/write.xlsx' (FORMAT 'xlsx', HEADER true);
+
+query IIIIII
+DESCRIBE SELECT * FROM '__TEST_DIR__/write.xlsx';
+----
+i	DOUBLE	YES	NULL	NULL	NULL
+S	VARCHAR	YES	NULL	NULL	NULL
+
+query II
+SELECT * FROM '__TEST_DIR__/write.xlsx';
+----
+2.0	foobar
+1.0	barbar
+
+query II
+SELECT * FROM read_xlsx('__TEST_DIR__/write.xlsx', header=false);
+----
+i	S
+2	foobar
+1	barbar

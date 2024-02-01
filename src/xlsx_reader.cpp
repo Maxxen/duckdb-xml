@@ -37,7 +37,7 @@ struct CellTypes {
 		case CellType::NUMBER:
 			return LogicalType::DOUBLE;
 		case CellType::DATE:
-			return LogicalType::DATE;
+			return LogicalType::TIMESTAMP;
 		case CellType::BOOLEAN:
 			return LogicalType::BOOLEAN;
 		case CellType::ERROR:
@@ -50,7 +50,7 @@ struct CellTypes {
 	static CellType FromString(const char *str) {
 		if (strcmp(str, "s") == 0) {
 			return CellType::SHARED_STRING;
-		} else if (strcmp(str, "str") == 0) {
+		} else if ((strcmp(str, "str") == 0) || (strcmp(str, "inlineStr") == 0))  {
 			return CellType::STRING;
 		} else if (strcmp(str, "n") == 0) {
 			return CellType::NUMBER;
@@ -181,7 +181,7 @@ enum class XLSXHeaderMode { ALWAYS, NEVER, AUTO };
 
 class XLSXSheetSniffer : public XMLStateMachine<XLSXSheetSniffer> {
 private:
-	enum class State { START, ROW, COLUMN, VALUE } state = State::START;
+	enum class State { START, ROW, COLUMN, VALUE, INLINE_STR, INLINE_STR_VALUE } state = State::START;
 
 	bool row_has_any_data = false;
 
@@ -241,6 +241,14 @@ public:
 		case State::COLUMN: {
 			if (matches(name, "v")) {
 				state = State::VALUE;
+				EnableTextParsing(true);
+			} else if (matches(name, "is")) {
+				state = State::INLINE_STR;
+			}
+		} break;
+		case State::INLINE_STR: {
+			if (matches(name, "t")) {
+				state = State::INLINE_STR_VALUE;
 				EnableTextParsing(true);
 			}
 		} break;
@@ -330,13 +338,24 @@ public:
 				EnableTextParsing(false);
 			}
 		} break;
+		case State::INLINE_STR: {
+			if (matches(name, "is")) {
+				state = State::COLUMN;
+			}
+		} break;
+		case State::INLINE_STR_VALUE: {
+			if (matches(name, "t")) {
+				state = State::INLINE_STR;
+				EnableTextParsing(false);
+			}
+		} break;
 		default:
 			break;
 		}
 	}
 
 	void OnCharacterData(const char *s, int len) {
-		if (state == State::VALUE) {
+		if (state == State::VALUE || state == State::INLINE_STR_VALUE) {
 			row_has_any_data = true;
 			row_data[current_col].append(s, len);
 		}
@@ -503,9 +522,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	D_ASSERT(!result->sheet_name.empty());
 
 	// Look for the string dictionary in the archive
-	if (!archive->TryGetEntryIndexByName("xl/sharedStrings.xml", result->string_dict_idx)) {
-		throw IOException("Failed to find string dictionary in file '%s'", result->file_name);
-	}
+	archive->TryGetEntryIndexByName("xl/sharedStrings.xml", result->string_dict_idx);
 
 	// Now we can parse the sheet
 	XLSXSheetSniffer sniffer;
@@ -562,6 +579,10 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 			// No shared strings, all the names are already in the header
 			names = sniffer.header_data;
 		} else {
+			// We need a string dictionary to find the shared strings
+			if (result->string_dict_idx < 0) {
+				throw IOException("Failed to find string dictionary in file '%s'", result->file_name);
+			}
 			// Scan the string dictionary for the shared strings
 			auto string_dict_stream = archive->Extract(result->string_dict_idx);
 			XLSXSparseStringTableParser parser;
@@ -701,6 +722,8 @@ private:
 	bool in_col_range = false;
 	bool in_row_range = false;
 	bool in_val = false;
+	bool in_is = false;
+	bool in_t = false;
 
 	const DenseStringTable &string_table;
 
@@ -761,6 +784,15 @@ public:
 			EnableTextParsing(true);
 			return;
 		}
+		if (in_col_range && !in_is && matches(name, "is")) {
+			in_is = true;
+			return;
+		}
+		if (in_is && !in_t && matches(name, "t")) {
+			in_t = true;
+			EnableTextParsing(true);
+			return;
+		}
 	}
 
 	void OnEndElement(const char *name) {
@@ -813,11 +845,21 @@ public:
 		if (in_col_range && in_val && matches(name, "v")) {
 			in_val = false;
 			EnableTextParsing(false);
+			return;
+		}
+		if (in_col_range && in_is && matches(name, "is")) {
+			in_is = false;
+			return;
+		}
+		if (in_is && in_t && matches(name, "t")) {
+			in_t = false;
+			EnableTextParsing(false);
+			return;
 		}
 	}
 
 	void OnCharacterData(const char *s, int len) {
-		if (in_val) {
+		if (in_val || in_t) {
 			current_cell_data.append(s, len);
 		}
 	}
@@ -854,9 +896,11 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 	result->archive = ZipArchiveFileHandle::Open(fs, bind_info.file_name);
 
 	// Parse the string dictionary
-	auto string_dict_stream = result->archive->Extract(bind_info.string_dict_idx);
-	XLSXDenseStringTableParser string_dict_parser(*result->string_table);
-	string_dict_parser.ParseUntilEnd(string_dict_stream);
+	if (bind_info.string_dict_idx != -1) {
+		auto string_dict_stream = result->archive->Extract(bind_info.string_dict_idx);
+		XLSXDenseStringTableParser string_dict_parser(*result->string_table);
+		string_dict_parser.ParseUntilEnd(string_dict_stream);
+	}
 
 	// Setup the projection map
 	vector<idx_t> projection_map(bind_info.col_count, -1);

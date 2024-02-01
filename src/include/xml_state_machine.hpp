@@ -42,7 +42,10 @@ public:
 			if (XML_GetErrorCode(parser) == XML_ERROR_ABORTED) {
 				return XMLParseResult::ABORTED;
 			} else {
-				throw IOException("XML parsing error: %s", XML_ErrorString(XML_GetErrorCode(parser)));
+				auto line_number = XML_GetCurrentLineNumber(parser);
+				auto column_number = XML_GetCurrentColumnNumber(parser);
+				auto error_string = XML_ErrorString(XML_GetErrorCode(parser));
+				throw IOException("XML parsing error: %d:%d, %s", line_number, column_number, error_string);
 			}
 		case XML_STATUS_SUSPENDED:
 			return XMLParseResult::SUSPENDED;

@@ -6,6 +6,7 @@
 
 namespace duckdb {
 
+// TODO: Remove this and port into to minizip-ng
 using namespace duckdb_miniz;
 
 //------------------------------------------------------------------------------
