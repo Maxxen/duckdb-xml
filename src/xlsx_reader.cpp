@@ -404,10 +404,10 @@ public:
 				row_types[current_col] = CellTypes::ToLogicalType(cell_type);
 
 				// Check if we have a number format that overrides the type
-				auto style_idx = std::atoi(GetAttribute(atts, "s", "-1"));
-				if (style_idx > 1) { // TODO: Should be >= 0
-					row_types[current_col] = style_sheet.GetStyleFormat(style_idx);
-				}
+				// auto style_idx = std::atoi(GetAttribute(atts, "s", "-1"));
+				//if (style_idx > 1) { // TODO: Should be >= 0
+				//	row_types[current_col] = style_sheet.GetStyleFormat(style_idx);
+				//}
 			}
 		} break;
 		case State::COLUMN: {
