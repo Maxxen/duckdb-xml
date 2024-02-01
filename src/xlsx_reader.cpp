@@ -50,7 +50,7 @@ struct CellTypes {
 	static CellType FromString(const char *str) {
 		if (strcmp(str, "s") == 0) {
 			return CellType::SHARED_STRING;
-		} else if ((strcmp(str, "str") == 0) || (strcmp(str, "inlineStr") == 0))  {
+		} else if ((strcmp(str, "str") == 0) || (strcmp(str, "inlineStr") == 0)) {
 			return CellType::STRING;
 		} else if (strcmp(str, "n") == 0) {
 			return CellType::NUMBER;
