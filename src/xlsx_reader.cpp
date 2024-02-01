@@ -192,7 +192,8 @@ public:
 				state = State::XF;
 
 				auto id = std::atoi(GetAttribute(atts, "numFmtId", "-1"));
-				LogicalType type = LogicalType::VARCHAR;
+				// TODO: This should probably be varchar, we need to check if we should apply the number format or not
+				LogicalType type = LogicalType::DOUBLE;
 				if (id < 164) {
 					// Special cases
 					if (id >= 14 && id <= 17) {
@@ -268,7 +269,7 @@ public:
 	}
 	LogicalType GetStyleFormat(idx_t idx) const {
 		if (idx >= formats.size()) {
-			return LogicalType::VARCHAR;
+			return LogicalType::DOUBLE;
 		}
 		return formats[idx];
 	}
@@ -404,7 +405,7 @@ public:
 
 				// Check if we have a number format that overrides the type
 				auto style_idx = std::atoi(GetAttribute(atts, "s", "-1"));
-				if (style_idx >= 0) {
+				if (style_idx > 1) { // TODO: Should be >= 0
 					row_types[current_col] = style_sheet.GetStyleFormat(style_idx);
 				}
 			}
@@ -468,10 +469,10 @@ public:
 						// We do this by checking if the first row is all strings (or empty)
 						// If it is, we treat it as a header and continue, otherwise we stop
 						bool all_strings = true;
-						for (idx_t i = 0; i < row_types.size(); i++) {
-							auto &type = row_types[i];
+						for (idx_t i = 0; i < row_cells.size(); i++) {
+							auto &type = row_cells[i];
 							bool is_empty = row_data[i].empty();
-							if (type != LogicalType::VARCHAR || is_empty) {
+							if ((type != CellType::STRING && type != CellType::SHARED_STRING) || is_empty) {
 								all_strings = false;
 								break;
 							}
