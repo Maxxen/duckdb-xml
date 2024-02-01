@@ -15,8 +15,27 @@
 
 namespace duckdb {
 
-static inline bool matches(const char *a, const char *b) {
+static inline bool Matches(const char *a, const char *b) {
 	return strcmp(a, b) == 0;
+}
+
+template <class... ARGS>
+static bool StringContainsAny(const char *str, ARGS &&...args) {
+	for (auto &&substr : {args...}) {
+		if (strstr(str, substr) != nullptr) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static inline const char *GetAttribute(const char **atts, const char *name, const char *default_value) {
+	for (int i = 0; atts[i]; i += 2) {
+		if (strcmp(atts[i], name) == 0) {
+			return atts[i + 1];
+		}
+	}
+	return default_value;
 }
 
 enum class CellType {
@@ -108,7 +127,7 @@ static idx_t TryGetColumnIndex(const char **atts) {
 static idx_t TryGetRowIdx(const char **atts) {
 	for (int i = 0; atts[i]; i += 2) {
 		if (strcmp(atts[i], "r") == 0) {
-			idx_t value = std::stoi(atts[i + 1]);
+			idx_t value = std::atoi(atts[i + 1]);
 			return value - 1; // 0 indexed
 		}
 	}
@@ -118,6 +137,142 @@ static idx_t TryGetRowIdx(const char **atts) {
 //------------------------------------------------------------------------------
 // XLSX Parsers
 //------------------------------------------------------------------------------
+
+class XLSXStyleSheetParser : public XMLStateMachine<XLSXStyleSheetParser> {
+	enum class State { START, STYLESHEET, NUMFMTS, NUMFMT, CELLXFS, XF } state = State::START;
+
+	unordered_map<int, LogicalType> format_map;
+
+public:
+	vector<LogicalType> style_formats;
+
+	void OnStartElement(const char *name, const char **atts) {
+		switch (state) {
+		case State::START:
+			if (Matches(name, "styleSheet")) {
+				state = State::STYLESHEET;
+				return;
+			}
+			break;
+		case State::STYLESHEET:
+			if (Matches(name, "numFmts")) {
+				state = State::NUMFMTS;
+				return;
+			} else if (Matches(name, "cellXfs")) {
+				state = State::CELLXFS;
+				return;
+			}
+			break;
+		case State::NUMFMTS: {
+			if (Matches(name, "numFmt")) {
+				state = State::NUMFMT;
+
+				auto id = std::atoi(GetAttribute(atts, "numFmtId", "-1"));
+				auto format = GetAttribute(atts, "formatCode", nullptr);
+				// Format id starts at 164
+				if (id > 163 && format != nullptr) {
+					// Try to detect if the format is a date or time
+					auto has_date_part = StringContainsAny(format, "DD", "dd", "YY", "yy");
+					auto has_time_part = StringContainsAny(format, "HH", "hh");
+
+					if (has_date_part && has_time_part) {
+						format_map.emplace(id, LogicalType::TIMESTAMP);
+					} else if (has_date_part) {
+						format_map.emplace(id, LogicalType::DATE);
+					} else if (has_time_part) {
+						format_map.emplace(id, LogicalType::TIME);
+					} else {
+						format_map.emplace(id, LogicalType::VARCHAR); // Or double?
+					}
+				}
+			}
+		} break;
+		case State::CELLXFS: {
+			if (Matches(name, "xf")) {
+				state = State::XF;
+
+				auto id = std::atoi(GetAttribute(atts, "numFmtId", "-1"));
+				LogicalType type = LogicalType::VARCHAR;
+				if (id < 164) {
+					// Special cases
+					if (id >= 14 && id <= 17) {
+						type = LogicalType::DATE;
+					} else if (id >= 18 && id <= 21) {
+						type = LogicalType::TIME;
+					} else if (id == 22) {
+						type = LogicalType::TIMESTAMP;
+					}
+				} else {
+					// Look up the ID in the format map
+					auto it = format_map.find(id);
+					if (it != format_map.end()) {
+						type = it->second;
+					}
+				}
+				style_formats.push_back(type);
+			}
+		} break;
+		default:
+			break;
+		}
+	}
+
+	void OnEndElement(const char *name) {
+		switch (state) {
+		case State::STYLESHEET:
+			if (Matches(name, "styleSheet")) {
+				state = State::START;
+				Stop();
+				return;
+			}
+			break;
+		case State::NUMFMTS:
+			if (Matches(name, "numFmts")) {
+				state = State::STYLESHEET;
+				return;
+			}
+			break;
+		case State::NUMFMT:
+			if (Matches(name, "numFmt")) {
+				state = State::NUMFMTS;
+				return;
+			}
+			break;
+		case State::CELLXFS:
+			if (Matches(name, "cellXfs")) {
+				state = State::STYLESHEET;
+				return;
+			}
+			break;
+		case State::XF:
+			if (Matches(name, "xf")) {
+				state = State::CELLXFS;
+				return;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+	void OnCharacterData(const char *s, int len) {
+	}
+};
+
+class StyleSheet {
+	vector<LogicalType> formats;
+
+public:
+	explicit StyleSheet(vector<LogicalType> formats_p) : formats(std::move(formats_p)) {
+	}
+	explicit StyleSheet() {
+	}
+	LogicalType GetStyleFormat(idx_t idx) const {
+		if (idx >= formats.size()) {
+			return LogicalType::VARCHAR;
+		}
+		return formats[idx];
+	}
+};
 
 class XLSXWorkBookParser : public XMLStateMachine<XLSXWorkBookParser> {
 private:
@@ -129,15 +284,15 @@ public:
 	vector<std::pair<string, idx_t>> sheets;
 
 	void OnStartElement(const char *name, const char **atts) {
-		if (!in_workbook && matches(name, "workbook")) {
+		if (!in_workbook && Matches(name, "workbook")) {
 			in_workbook = true;
 			return;
 		}
-		if (in_workbook && !in_sheets && matches(name, "sheets")) {
+		if (in_workbook && !in_sheets && Matches(name, "sheets")) {
 			in_sheets = true;
 			return;
 		}
-		if (in_workbook && in_sheets && !in_sheet && matches(name, "sheet")) {
+		if (in_workbook && in_sheets && !in_sheet && Matches(name, "sheet")) {
 			in_sheet = true;
 			string sheet_name;
 			bool found_id = false;
@@ -158,15 +313,15 @@ public:
 	}
 
 	void OnEndElement(const char *name) {
-		if (in_workbook && in_sheets && in_sheet && matches(name, "sheet")) {
+		if (in_workbook && in_sheets && in_sheet && Matches(name, "sheet")) {
 			in_sheet = false;
 			return;
 		}
-		if (in_workbook && in_sheets && matches(name, "sheets")) {
+		if (in_workbook && in_sheets && Matches(name, "sheets")) {
 			in_sheets = false;
 			return;
 		}
-		if (in_workbook && matches(name, "workbook")) {
+		if (in_workbook && Matches(name, "workbook")) {
 			in_workbook = false;
 			Stop();
 			return;
@@ -206,16 +361,23 @@ public:
 
 	// The data of the header
 	vector<string> header_data;
-	vector<CellType> header_types;
+	vector<LogicalType> header_types;
+	vector<CellType> header_cells;
 
 	// The data of the first row (after the header, if present)
-	vector<CellType> row_types;
 	vector<string> row_data;
+	vector<LogicalType> row_types;
+	vector<CellType> row_cells;
+
+	const StyleSheet &style_sheet;
+
+	explicit XLSXSheetSniffer(const StyleSheet &style_sheet_p) : style_sheet(style_sheet_p) {
+	}
 
 	void OnStartElement(const char *name, const char **atts) {
 		switch (state) {
 		case State::START: {
-			if (matches(name, "row")) {
+			if (Matches(name, "row")) {
 				state = State::ROW;
 				current_row = TryGetRowIdx(atts);
 
@@ -227,27 +389,36 @@ public:
 			}
 		} break;
 		case State::ROW: {
-			if (matches(name, "c")) {
+			if (Matches(name, "c")) {
 				state = State::COLUMN;
 				current_col = TryGetColumnIndex(atts);
 				if (current_col >= end_column) {
 					end_column = current_col;
-					row_types.resize(current_col + 1, CellType::NUMBER);
+					row_types.resize(current_col + 1, LogicalType::DOUBLE);
+					row_cells.resize(current_col + 1, CellType::NUMBER);
 					row_data.resize(current_col + 1, "");
 				}
-				row_types[current_col] = CellTypes::FromAttributes(atts);
+				auto cell_type = CellTypes::FromAttributes(atts);
+				row_cells[current_col] = cell_type;
+				row_types[current_col] = CellTypes::ToLogicalType(cell_type);
+
+				// Check if we have a number format that overrides the type
+				auto style_idx = std::atoi(GetAttribute(atts, "s", "-1"));
+				if (style_idx >= 0) {
+					row_types[current_col] = style_sheet.GetStyleFormat(style_idx);
+				}
 			}
 		} break;
 		case State::COLUMN: {
-			if (matches(name, "v")) {
+			if (Matches(name, "v")) {
 				state = State::VALUE;
 				EnableTextParsing(true);
-			} else if (matches(name, "is")) {
+			} else if (Matches(name, "is")) {
 				state = State::INLINE_STR;
 			}
 		} break;
 		case State::INLINE_STR: {
-			if (matches(name, "t")) {
+			if (Matches(name, "t")) {
 				state = State::INLINE_STR_VALUE;
 				EnableTextParsing(true);
 			}
@@ -260,7 +431,7 @@ public:
 	void OnEndElement(const char *name) {
 		switch (state) {
 		case State::ROW: {
-			if (matches(name, "row")) {
+			if (Matches(name, "row")) {
 				state = State::START;
 
 				// If we dont have a start row set, we set it to the first row that has any data
@@ -290,6 +461,7 @@ public:
 						found_header = true;
 						header_data = row_data;
 						header_types = row_types;
+						header_cells = row_cells;
 						start_row++;
 					} else if (header_mode == XLSXHeaderMode::AUTO) {
 						// Maybe, try to automatically detect if the first row is a header
@@ -299,7 +471,7 @@ public:
 						for (idx_t i = 0; i < row_types.size(); i++) {
 							auto &type = row_types[i];
 							bool is_empty = row_data[i].empty();
-							if ((type != CellType::STRING && type != CellType::SHARED_STRING) || is_empty) {
+							if (type != LogicalType::VARCHAR || is_empty) {
 								all_strings = false;
 								break;
 							}
@@ -309,6 +481,7 @@ public:
 							found_header = true;
 							header_data = row_data;
 							header_types = row_types;
+							header_cells = row_cells;
 							start_row++;
 						} else {
 							// Some are not strings... this is probably data. Let's stop here.
@@ -323,28 +496,30 @@ public:
 				row_data.clear();
 				row_data.resize(end_column + 1, "");
 				row_types.clear();
-				row_types.resize(end_column + 1, CellType::NUMBER);
+				row_types.resize(end_column + 1, LogicalType::DOUBLE);
+				row_cells.clear();
+				row_cells.resize(end_column + 1, CellType::NUMBER);
 				return;
 			}
 		} break;
 		case State::COLUMN: {
-			if (matches(name, "c")) {
+			if (Matches(name, "c")) {
 				state = State::ROW;
 			}
 		} break;
 		case State::VALUE: {
-			if (matches(name, "v")) {
+			if (Matches(name, "v")) {
 				state = State::COLUMN;
 				EnableTextParsing(false);
 			}
 		} break;
 		case State::INLINE_STR: {
-			if (matches(name, "is")) {
+			if (Matches(name, "is")) {
 				state = State::COLUMN;
 			}
 		} break;
 		case State::INLINE_STR_VALUE: {
-			if (matches(name, "t")) {
+			if (Matches(name, "t")) {
 				state = State::INLINE_STR;
 				EnableTextParsing(false);
 			}
@@ -376,7 +551,7 @@ public:
 
 	void OnStartElement(const char *name, const char **atts) {
 		// TODO: Harden this to only match the t tag in the right namespace
-		if (matches(name, "t")) {
+		if (Matches(name, "t")) {
 			in_t_tag = true;
 			EnableTextParsing(true);
 			return;
@@ -384,7 +559,7 @@ public:
 	}
 
 	void OnEndElement(const char *name) {
-		if (matches(name, "t")) {
+		if (Matches(name, "t")) {
 			in_t_tag = false;
 			EnableTextParsing(false);
 
@@ -435,6 +610,12 @@ struct XLSXBindInfo : public TableFunctionData {
 	idx_t col_count = 0;
 	// The empty rows to pad in the beginning (if any)
 	idx_t initial_empty_rows = 0;
+
+	// The style sheet
+	unique_ptr<StyleSheet> style_sheet;
+
+	// Cell types
+	vector<CellType> cell_types;
 };
 
 static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindInput &input,
@@ -524,8 +705,20 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	// Look for the string dictionary in the archive
 	archive->TryGetEntryIndexByName("xl/sharedStrings.xml", result->string_dict_idx);
 
+	// Also look for a style sheet, and if it exists, parse it immediately
+	int style_sheet_idx = -1;
+	if (archive->TryGetEntryIndexByName("xl/styles.xml", style_sheet_idx)) {
+		auto style_sheet_stream = archive->Extract(style_sheet_idx);
+		XLSXStyleSheetParser style_sheet_parser;
+		style_sheet_parser.ParseUntilEnd(style_sheet_stream);
+		result->style_sheet = make_uniq<StyleSheet>(std::move(style_sheet_parser.style_formats));
+	} else {
+		// Empty style sheet
+		result->style_sheet = make_uniq<StyleSheet>();
+	}
+
 	// Now we can parse the sheet
-	XLSXSheetSniffer sniffer;
+	XLSXSheetSniffer sniffer(*result->style_sheet);
 	sniffer.has_start_row = has_initial_rows_to_skip;
 	sniffer.start_row = initial_rows_to_skip;
 	sniffer.header_mode = has_first_row_is_header
@@ -545,6 +738,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 	result->start_row = sniffer.start_row;
 	result->col_count = sniffer.end_column + 1; // We start at col 0. If we end at 2, we have 3 columns
 	result->initial_empty_rows = sniffer.start_row > sniffer.first_row ? 0 : (sniffer.first_row - sniffer.start_row);
+	result->cell_types = sniffer.row_cells;
 
 	// Set the return types
 	for (idx_t i = 0; i < sniffer.row_types.size(); i++) {
@@ -555,7 +749,7 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 			if (sniffer.row_data[i].empty()) {
 				return_types.push_back(LogicalType::VARCHAR);
 			} else {
-				return_types.push_back(CellTypes::ToLogicalType(sniffer.row_types[i]));
+				return_types.push_back(sniffer.row_types[i]);
 			}
 		}
 	}
@@ -570,8 +764,8 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 		// If any names contain shared strings, we do a sparse scan of the string dictionary to find them.
 		// Is there any shared strings in the header?
 		vector<idx_t> shared_string_indices;
-		for (idx_t i = 0; i < sniffer.header_types.size(); i++) {
-			if (sniffer.header_types[i] == CellType::SHARED_STRING) {
+		for (idx_t i = 0; i < sniffer.header_cells.size(); i++) {
+			if (sniffer.header_cells[i] == CellType::SHARED_STRING) {
 				shared_string_indices.push_back(std::stoi(sniffer.header_data[i]));
 			}
 		}
@@ -590,8 +784,8 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, TableFunctionBindIn
 			parser.ParseUntilEnd(string_dict_stream);
 
 			// Now we can set the names
-			for (idx_t i = 0; i < sniffer.header_types.size(); i++) {
-				if (sniffer.header_types[i] == CellType::SHARED_STRING) {
+			for (idx_t i = 0; i < sniffer.header_cells.size(); i++) {
+				if (sniffer.header_cells[i] == CellType::SHARED_STRING) {
 					auto idx = std::stoi(sniffer.header_data[i]);
 					auto entry = parser.string_table.find(idx);
 					if (entry == parser.string_table.end()) {
@@ -753,7 +947,7 @@ public:
 	}
 
 	void OnStartElement(const char *name, const char **atts) {
-		if (!in_row && matches(name, "row")) {
+		if (!in_row && Matches(name, "row")) {
 			in_row = true;
 			current_row = TryGetRowIdx(atts);
 
@@ -764,7 +958,7 @@ public:
 
 			return;
 		}
-		if (in_row_range && !in_col && matches(name, "c")) {
+		if (in_row_range && !in_col && Matches(name, "c")) {
 			in_col = true;
 			current_col = TryGetColumnIndex(atts);
 			current_cell_type = CellTypes::FromAttributes(atts);
@@ -779,16 +973,16 @@ public:
 
 			return;
 		}
-		if (in_col_range && !in_val && matches(name, "v")) {
+		if (in_col_range && !in_val && Matches(name, "v")) {
 			in_val = true;
 			EnableTextParsing(true);
 			return;
 		}
-		if (in_col_range && !in_is && matches(name, "is")) {
+		if (in_col_range && !in_is && Matches(name, "is")) {
 			in_is = true;
 			return;
 		}
-		if (in_is && !in_t && matches(name, "t")) {
+		if (in_is && !in_t && Matches(name, "t")) {
 			in_t = true;
 			EnableTextParsing(true);
 			return;
@@ -796,7 +990,7 @@ public:
 	}
 
 	void OnEndElement(const char *name) {
-		if (in_row && matches(name, "row")) {
+		if (in_row && Matches(name, "row")) {
 			in_row = false;
 
 			if (in_row_range) {
@@ -819,7 +1013,7 @@ public:
 
 			return;
 		}
-		if (in_row_range && in_col && matches(name, "c")) {
+		if (in_row_range && in_col && Matches(name, "c")) {
 			in_col = false;
 
 			if (in_col_range && !current_cell_data.empty() && projection_map[current_col] != -1) {
@@ -842,16 +1036,16 @@ public:
 			current_cell_data.clear();
 			return;
 		}
-		if (in_col_range && in_val && matches(name, "v")) {
+		if (in_col_range && in_val && Matches(name, "v")) {
 			in_val = false;
 			EnableTextParsing(false);
 			return;
 		}
-		if (in_col_range && in_is && matches(name, "is")) {
+		if (in_col_range && in_is && Matches(name, "is")) {
 			in_is = false;
 			return;
 		}
-		if (in_is && in_t && matches(name, "t")) {
+		if (in_is && in_t && Matches(name, "t")) {
 			in_t = false;
 			EnableTextParsing(false);
 			return;
@@ -927,6 +1121,7 @@ static unique_ptr<GlobalTableFunctionState> InitGlobal(ClientContext &context, T
 
 static void Execute(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
 	auto &state = data_p.global_state->Cast<XLSXReaderGlobalState>();
+	auto &bind_data = data_p.bind_data->Cast<XLSXBindInfo>();
 	auto &reader = *state.sheet_reader;
 	auto &stream = *state.sheet_stream;
 	auto &status = state.status;
@@ -967,6 +1162,33 @@ static void Execute(ClientContext &context, TableFunctionInput &data_p, DataChun
 	output.SetCardinality(reader.current_output_row);
 	if (reader.current_output_row != 0) {
 		for (idx_t i = 0; i < output.ColumnCount(); i++) {
+			/*
+			// Special case for datetime bullshit
+			auto &output_type = output.data[i].GetType();
+			auto &cell_type = bind_data.cell_types[state.column_ids[i]];
+			if(output_type == LogicalType::DATE && cell_type == CellType::NUMBER) {
+			    // The cell is a number, and its the number of days since 1900-01-01
+			    // We need to convert it to a date
+			    auto input_vec = FlatVector::GetData<string_t>(reader.payload_chunk.data[i]);
+			    auto output_vec = FlatVector::GetData<date_t>(output.data[i]);
+
+			    Vector intermediate(LogicalType::INTEGER);
+			    VectorOperations::DefaultCast(reader.payload_chunk.data[i], intermediate, reader.current_output_row);
+			    auto int_vec = FlatVector::GetData<int32_t>(intermediate);
+
+			    for(idx_t j = 0; j < reader.current_output_row; j++) {
+			        if(FlatVector::Validity(intermediate).RowIsValid(j)) {
+			            auto days = int_vec[j];
+			            auto start = Date::FromDate(1900, 1, 1);
+			            start.days += days;
+			            output_vec[j] = start;
+			        } else {
+			            FlatVector::SetNull(output.data[i], j, true);
+			        }
+			    }
+			} else {
+			 */
+			// Otherwise, just try to parse the string
 			VectorOperations::DefaultCast(reader.payload_chunk.data[i], output.data[i], reader.current_output_row);
 		}
 	}
